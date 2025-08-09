@@ -22,14 +22,10 @@ export default function Navigation() {
             <Link to="/friends">Friends</Link>
           </NavigationMenuLink>
         </NavigationMenuItem>
+
         <NavigationMenuItem>
           <NavigationMenuLink asChild className={navigationMenuTriggerStyle()}>
-            <Link to="/credits">Credit</Link>
-          </NavigationMenuLink>
-        </NavigationMenuItem>
-        <NavigationMenuItem>
-          <NavigationMenuLink asChild className={navigationMenuTriggerStyle()}>
-            <Link to="/settings">Settings</Link>
+            <Link to="/profiles">Profile</Link>
           </NavigationMenuLink>
         </NavigationMenuItem>
       </NavigationMenuList>

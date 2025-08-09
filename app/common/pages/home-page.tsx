@@ -1,6 +1,6 @@
 export default function HomePage() {
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8">
+    <div className="flex flex-col items-center justify-center p-8">
       <h1 className="text-2xl font-semibold mb-4">수어 통화를 시작해보세요</h1>
       <p className="mb-6 text-center text-muted-foreground max-w-sm">
         간편하고 빠르게, 필요한 순간에 바로 연결됩니다.

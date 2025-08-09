@@ -1,20 +1,14 @@
-import { useState } from "react";
 import { Link, redirect, useFetcher } from "react-router";
 import { Button } from "~/common/components/ui/button";
 import { Card, CardContent, CardFooter } from "~/common/components/ui/card";
 import { Input } from "~/common/components/ui/input";
 import { Label } from "~/common/components/ui/label";
 import { z } from "zod";
-import { toast } from "sonner";
 
-import {
-  containsAdmin,
-  containsHangulJamo,
-  containsProfanity,
-} from "~/lib/name-filter";
 import type { Route } from "./+types/signup-page";
 import { Alert, AlertTitle } from "~/common/components/ui/alert";
 import { makeSSRClient } from "~/supa-client";
+import { EmailSignup } from "../api";
 
 const formSchema = z
   .object({
@@ -23,18 +17,6 @@ const formSchema = z
       .email("유효한 이메일을 입력하세요."),
     password: z.string().min(6, "비밀번호는 최소 6자리 이상이어야 합니다."),
     confirmPassword: z.string(),
-    nickname: z
-      .string()
-      .min(3, "닉네임을 입력하세요.")
-      .refine((val) => !containsHangulJamo(val), {
-        message: "한글 (초성)만으로 이루어진 닉네임은 사용할 수 없습니다.",
-      })
-      .refine((val) => !containsProfanity(val), {
-        message: "비속어를 포함할 수 없습니다.",
-      })
-      .refine((val) => !containsAdmin(val), {
-        message: "관리자 닉네임은 사용할 수 없습니다.",
-      }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     path: ["confirmPassword"],
@@ -44,6 +26,7 @@ export const action = async ({ request }: Route.ActionArgs) => {
   const formData = await request.formData();
   const parsed = formSchema.safeParse(Object.fromEntries(formData));
   if (parsed.success === false) {
+    console.log("false");
     const formErrors: Record<string, string> = {};
 
     const passwordError = parsed.error.errors.find(
@@ -71,44 +54,41 @@ export const action = async ({ request }: Route.ActionArgs) => {
   }
   const { email, password } = parsed.data;
   const { client, headers } = makeSSRClient(request);
+  console.log("email,password", email, password);
   const { error } = await client.auth.signUp({
     email,
     password,
   });
 
   //supabase 회원가입 에러처리
-  if (error?.status === 422 && error?.code === "user_already_exists") {
-    return { formErrors: { email: "이미 가입된 이메일입니다." } };
-  } else {
-    const { data: loginData, error: loginError } =
-      await client.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-    if (loginError) {
-      return { formErrors: { general: "회원가입은 되었으나 로그인 실패" } };
+  if (error) {
+    if (error.status === 422 && error.code === "user_already_exists") {
+      return { formErrors: { email: "이미 가입된 이메일입니다." } };
     }
-
-    const freshToken = loginData.session?.access_token;
-    if (!freshToken) {
-      return { formErrors: { general: "로그인 후 토큰 획득 실패" } };
-    }
-
-    // 장고 회원가입
-    //await signupWithPassword(email, freshToken);
-
-    return redirect("/", {
-      headers,
-    });
+    return { formErrors: { general: "회원가입 중 오류가 발생했습니다." } };
   }
+
+  const { data: loginData, error: loginError } =
+    await client.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+  const freshToken = loginData.session?.access_token;
+  if (!freshToken) {
+    return { formErrors: { general: "로그인 후 토큰 획득 실패" } };
+  }
+  await EmailSignup(freshToken);
+  return redirect("/", {
+    headers,
+  });
 };
 export default function SignupPage() {
   const fetcher = useFetcher();
 
   return (
     <Card className="w-full max-w-md mx-auto">
-      <fetcher.Form>
+      <fetcher.Form method="post">
         <CardContent className="space-y-4 pt-6">
           <div className="space-y-2">
             <Label htmlFor="email">이메일</Label>
