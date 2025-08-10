@@ -86,13 +86,17 @@ export const action = async ({ request }: Route.ActionArgs) => {
   if (!token) {
     return { globalError: "로그인이 필요합니다." };
   }
-  console.log("avatar,name", avatar, name);
 
-  const status = await updateUserProfile(token, avatar ?? null, name);
-  if (status == 200) {
-    return redirect("/profiles");
-  } else {
-    return { globalError: "프로필 수정에 실패했습니다." };
+  try {
+    const status = await updateUserProfile(token, avatar ?? null, name);
+    if (status === 200) {
+      return redirect("/profiles");
+    }
+  } catch (e) {
+    return {
+      globalError:
+        e instanceof Error ? e.message : "프로필 수정에 실패했습니다.",
+    };
   }
 };
 

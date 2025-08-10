@@ -106,7 +106,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-screen bg-gray-50 px-10">
       <div className=" mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">프로필</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-8">Profile</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* 왼쪽 프로필 섹션 (평면) */}
