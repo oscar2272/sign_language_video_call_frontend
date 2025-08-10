@@ -1,16 +1,122 @@
 import { useState } from "react";
+import { Button } from "~/common/components/ui/button";
+import { ReceivedRequests } from "../components/ReceivedRequest";
+import { SentRequests } from "../components/SentRequests";
+import { FriendsList } from "../components/FriendList";
+import { SearchUsers } from "../components/SearchUsers";
+
+// 임시 데이터 예시
+const dummyUsers: UserProfile[] = [
+  {
+    id: 1,
+    email: "chulsoo@example.com",
+    profile: {
+      nickname: "철수",
+      profile_image_url: null,
+    },
+  },
+  {
+    id: 2,
+    email: "younghee@example.com",
+    profile: {
+      nickname: "영희",
+      profile_image_url: "https://randomuser.me/api/portraits/women/68.jpg",
+    },
+  },
+  {
+    id: 3,
+    email: "minsu@example.com",
+    profile: {
+      nickname: "민수",
+      profile_image_url: null,
+    },
+  },
+  {
+    id: 4,
+    email: "sujin@example.com",
+    profile: {
+      nickname: "수진",
+      profile_image_url: "https://randomuser.me/api/portraits/women/10.jpg",
+    },
+  },
+  {
+    id: 5,
+    email: "jaehyun@example.com",
+    profile: {
+      nickname: "재현",
+      profile_image_url: "https://randomuser.me/api/portraits/men/20.jpg",
+    },
+  },
+  {
+    id: 6,
+    email: "dahyun@example.com",
+    profile: {
+      nickname: "다현",
+      profile_image_url: null,
+    },
+  },
+];
+
+// 임시 친구 요청 데이터
+const dummyFriendRelations: FriendRelation[] = [
+  {
+    id: 1,
+    from_user: dummyUsers[0],
+    to_user: dummyUsers[1],
+    status: "PENDING",
+  },
+  {
+    id: 2,
+    from_user: dummyUsers[2],
+    to_user: dummyUsers[0],
+    status: "PENDING",
+  },
+  {
+    id: 3,
+    from_user: dummyUsers[0],
+    to_user: dummyUsers[3],
+    status: "ACCEPTED",
+  },
+  {
+    id: 4,
+    from_user: dummyUsers[4],
+    to_user: dummyUsers[0],
+    status: "ACCEPTED",
+  },
+  {
+    id: 5,
+    from_user: dummyUsers[0],
+    to_user: dummyUsers[5],
+    status: "REJECTED",
+  },
+];
 
 export default function FriendsPage() {
+  const currentUserId = 1;
+
   const [activeTab, setActiveTab] = useState<
     "received" | "sent" | "friends" | "search"
   >("received");
+  const receivedRelations = dummyFriendRelations.filter(
+    (rel) => rel.to_user.id === currentUserId && rel.status === "PENDING"
+  );
 
+  const sentRelations = dummyFriendRelations.filter(
+    (rel) => rel.from_user.id === currentUserId && rel.status === "PENDING"
+  );
+
+  // 친구 목록 (ACCEPTED)
+  const friendsRelations = dummyFriendRelations.filter(
+    (rel) =>
+      rel.status === "ACCEPTED" &&
+      (rel.from_user.id === currentUserId || rel.to_user.id === currentUserId)
+  );
   return (
     <div className="px-10 mx-auto">
       <h1 className="text-2xl font-bold mb-4">Friend</h1>
 
       {/* 탭 메뉴 */}
-      <div className="flex border-b mb-6">
+      <div className="flex border-b mb-6 space-x-4 justify-start">
         {["받은 요청", "보낸 요청", "친구 목록", "유저 검색"].map((tab) => {
           const key =
             tab === "받은 요청"
@@ -24,10 +130,10 @@ export default function FriendsPage() {
             <button
               key={key}
               onClick={() => setActiveTab(key as any)}
-              className={`px-4 py-2 -mb-px border-b-2 ${
+              className={`text-center px-3 py-1 text-sm -mb-px border-b-2 ${
                 activeTab === key
-                  ? "border-primary font-semibold"
-                  : "border-transparent text-muted-foreground"
+                  ? "border-blue-600 font-semibold"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
               {tab}
@@ -38,34 +144,73 @@ export default function FriendsPage() {
 
       {/* 컨텐츠 영역 */}
       <div>
-        {activeTab === "received" && <ReceivedRequests />}
-        {activeTab === "sent" && <SentRequests />}
-        {activeTab === "friends" && <FriendsList />}
-        {activeTab === "search" && <SearchUsers />}
+        {activeTab === "received" && (
+          <ReceivedRequests
+            relations={receivedRelations}
+            onAccept={() => {}}
+            onReject={() => {}}
+          />
+        )}
+        {activeTab === "sent" && (
+          <SentRequests relations={sentRelations} onCancel={() => {}} />
+        )}
+        {activeTab === "friends" && (
+          <FriendsList
+            relations={friendsRelations} // 친구 목록만 넘기기
+            currentUserId={currentUserId}
+            onDelete={() => {}}
+          />
+        )}
+        {activeTab === "search" && (
+          <SearchUsers
+            users={dummyUsers}
+            onFriendRequest={(id) => console.log("친구 요청", id)}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-// 각 컴포넌트 예시 (더미)
-function ReceivedRequests() {
-  return <div>받은 친구 요청 목록 (수락 / 거절 버튼 포함)</div>;
-}
-function SentRequests() {
-  return <div>내가 보낸 친구 요청 목록 (취소 버튼 포함)</div>;
-}
-function FriendsList() {
-  return <div>내 친구 목록 (프로필, 상태, 삭제 등)</div>;
-}
-function SearchUsers() {
+export function Pagination({
+  page,
+  maxPage,
+  onPageChange,
+}: {
+  page: number;
+  maxPage: number;
+  onPageChange: (newPage: number) => void;
+}) {
   return (
-    <div>
-      <input
-        type="text"
-        placeholder="유저 닉네임 또는 이메일로 검색"
-        className="w-full p-2 border rounded"
-      />
-      <div className="mt-4">검색 결과가 여기 표시됩니다.</div>
+    <div className="flex justify-center mt-4 space-x-2">
+      <button
+        disabled={page <= 1}
+        onClick={() => onPageChange(page - 1)}
+        className="px-3 py-1 border rounded disabled:opacity-50"
+      >
+        이전
+      </button>
+      {[...Array(maxPage)].map((_, i) => {
+        const p = i + 1;
+        return (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`px-3 py-1 border rounded ${
+              p === page ? "bg-blue-600 text-white" : "hover:bg-gray-100"
+            }`}
+          >
+            {p}
+          </button>
+        );
+      })}
+      <button
+        disabled={page >= maxPage}
+        onClick={() => onPageChange(page + 1)}
+        className="px-3 py-1 border rounded disabled:opacity-50"
+      >
+        다음
+      </button>
     </div>
   );
 }
