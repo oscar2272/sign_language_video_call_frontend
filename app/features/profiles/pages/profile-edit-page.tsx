@@ -2,7 +2,7 @@ import { makeSSRClient } from "~/supa-client";
 import { containsAdmin, containsHangulJamo } from "../utils/name-filter";
 import type { Route } from "./+types/profile-edit-page";
 import { z } from "zod";
-import { updateUserProfile } from "../api";
+import { updateUserProfile } from "../profile-api";
 import { Form, redirect, useNavigate, useOutletContext } from "react-router";
 import { Button } from "~/common/components/ui/button";
 import { ArrowLeft } from "lucide-react";

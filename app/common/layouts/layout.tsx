@@ -11,7 +11,7 @@ import {
   navigationMenuTriggerStyle,
 } from "../components/ui/navigation-menu";
 import Navigation from "../components/navigations";
-import { getUserProfile } from "~/features/profiles/api";
+import { getUserProfile } from "~/features/profiles/profile-api";
 import type { UserProfile } from "~/features/profiles/type";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
@@ -38,13 +38,14 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     if (!token) return null;
     const user = await getUserProfile(token);
     const hasNotifications = true;
-    return { user, hasNotifications };
+    return { user, hasNotifications, token };
   }
 };
 
 export default function Layout({ loaderData }: Route.ComponentProps) {
   const profile = loaderData?.user.profile;
   const user = loaderData?.user;
+  const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -142,7 +143,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
 
       {/* Content */}
       <main className="flex-1 pt-20 xl:px-32 lg:px-24 md:px-16 px-8">
-        <Outlet context={{ user: loaderData!.user }} />
+        <Outlet context={{ user: loaderData!.user, token }} />
       </main>
     </div>
   );

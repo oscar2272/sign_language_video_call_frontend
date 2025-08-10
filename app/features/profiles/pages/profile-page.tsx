@@ -1,4 +1,3 @@
-import type { Route } from "./+types/profile-page";
 import { Link, useOutletContext } from "react-router";
 import type { UserProfile } from "../type";
 import {
@@ -6,39 +5,103 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "~/common/components/ui/avatar";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
+import {
+  loadTossPayments,
+  ANONYMOUS,
+  type TossPaymentsWidgets,
+} from "@tosspayments/tosspayments-sdk";
+import { CreateOrder } from "../payment-api";
+import { makeSSRClient } from "~/supa-client";
+import { getLoggedInUserId } from "~/features/auth/quries";
+import type { Route } from "./+types/profile-page";
 
-export default function ProfilePage() {
-  const { user } = useOutletContext<{ user: UserProfile }>();
+export const loader = async ({ request }: Route.LoaderArgs) => {
+  const { client } = makeSSRClient(request);
+  const userId = await getLoggedInUserId(client);
+  return { userId };
+};
+export default function ProfilePage({ loaderData }: Route.ComponentProps) {
+  const { user, token } = useOutletContext<{
+    user: UserProfile;
+    token: string;
+  }>();
 
   const [credits, setCredits] = useState({
     remained_credit: 5,
   });
 
-  const usageHistory = [
-    {
-      date: "2024-08-08",
-      amount: -1,
-      description: "AI 서비스 사용",
-      remaining: 4,
-    },
-    {
-      date: "2024-08-06",
-      amount: +5,
-      description: "크레딧 충전",
-      remaining: 5,
-    },
-  ];
+  const [buyAmount, setBuyAmount] = useState(0);
+  const pricePerCredit = 1000; // 1크레딧당 1000원
+  const minutesPerCredit = 10; // 1크레딧당 10분
 
-  const [buyAmount, setBuyAmount] = useState(1);
+  const totalPrice = (buyAmount * pricePerCredit).toFixed(0); // 총 금액 (원 단위, 소수점 없음)
+  const totalMinutes = buyAmount * minutesPerCredit;
 
-  const pricePerCredit = 1 / 20; // 1크레딧당 $0.05
-  const totalPrice = (buyAmount * pricePerCredit).toFixed(2);
-  const totalMinutes = buyAmount;
-
-  // 카드에 표시할 간단한 '카드번호' 같은 텍스트 (예시)
+  // 카드에 표시할 간단한 '카드번호' 디자인
   const fakeCardNumber = "**** 1234 **** 3453";
+
+  const widgets = useRef<TossPaymentsWidgets | null>(null);
+  const initedToss = useRef<boolean>(false);
+  useEffect(() => {
+    const initToss = async () => {
+      const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY;
+      if (initedToss.current) return;
+      initedToss.current = true;
+      const toss = await loadTossPayments(clientKey);
+      widgets.current = await toss.widgets({
+        customerKey: loaderData.userId!,
+      });
+      await widgets.current.setAmount({
+        value: 0,
+        currency: "KRW",
+      });
+      await widgets.current.renderPaymentMethods({
+        selector: "#toss-payment-methods",
+      });
+      await widgets.current.renderAgreement({
+        selector: "#toss-payment-agreement",
+      });
+    };
+    initToss();
+  }, []);
+  useEffect(() => {
+    const updateAmount = async () => {
+      if (widgets.current) {
+        await widgets.current.setAmount({
+          value: buyAmount * 1000,
+          currency: "KRW",
+        });
+      }
+    };
+    updateAmount();
+  }, [buyAmount]);
+
+  // 1. 결제하기 버튼 onClick 핸들러
+  async function handlePayment(token: string, buyAmount: number) {
+    try {
+      // 2. 백엔드에 주문 생성 요청
+
+      const { orderId, amount } = await CreateOrder(token, buyAmount);
+
+      // 3. Toss Payments 위젯에 주문 ID 등 넘겨 결제 시작
+      if (widgets.current) {
+        await widgets.current.requestPayment({
+          orderId: orderId, //crypto.randomUUID
+          orderName: `크레딧 ${amount / 1000}개`,
+          customerEmail: "",
+          metadata: {
+            amount,
+          },
+          successUrl: `${window.location.origin}/credits/success`,
+          failUrl: `${window.location.origin}/credits/fail`,
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 px-10">
@@ -128,7 +191,8 @@ export default function ProfilePage() {
                   {credits.remained_credit} 크레딧
                 </p>
                 <p className="text-sm font-semibold mt-1">
-                  AI 서비스 이용 가능 시간: {credits.remained_credit} 분
+                  AI 서비스 이용 가능 시간:{" "}
+                  {credits.remained_credit * minutesPerCredit} 분
                 </p>
               </div>
 
@@ -138,7 +202,7 @@ export default function ProfilePage() {
                   <span>크레딧 잔액</span>
                 </div>
                 <p className="text-lg font-semibold">
-                  ${(credits.remained_credit * pricePerCredit).toFixed(2)}
+                  {credits.remained_credit * pricePerCredit} 원
                 </p>
               </div>
             </div>
@@ -159,6 +223,7 @@ export default function ProfilePage() {
                   >
                     구매할 크레딧 수:
                   </label>
+
                   <input
                     id="credit-input"
                     type="number"
@@ -166,10 +231,9 @@ export default function ProfilePage() {
                     max={1000}
                     value={buyAmount}
                     onChange={(e) => {
-                      const val = Math.max(
-                        0,
-                        Math.min(1000, Number(e.target.value))
-                      );
+                      const inputValue = e.target.value;
+                      const num = inputValue === "" ? 0 : Number(inputValue);
+                      const val = Math.max(0, Math.min(1000, num));
                       setBuyAmount(val);
                     }}
                     className="border rounded px-3 py-1 w-20 text-center text-sm"
@@ -180,7 +244,7 @@ export default function ProfilePage() {
                     <p>
                       총 금액:{" "}
                       <span className="font-semibold text-orange-600">
-                        ${totalPrice}
+                        {totalPrice} 원
                       </span>
                     </p>
                     <p>
@@ -193,11 +257,8 @@ export default function ProfilePage() {
                   <div className="mt-4 sm:mt-0 sm:ml-auto">
                     <Button
                       className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded shadow transition text-sm whitespace-nowrap"
-                      onClick={() => {
-                        alert(
-                          `${buyAmount} 크레딧 구매 완료! 총 금액: $${totalPrice} 결제 진행하세요.`
-                        );
-                      }}
+                      onClick={() => handlePayment(token, buyAmount)}
+                      disabled={buyAmount === 0}
                     >
                       결제하기
                     </Button>
@@ -206,7 +267,7 @@ export default function ProfilePage() {
               </div>
 
               {/* 크레딧 사용 내역 */}
-              <div>
+              {/* <div>
                 <h4 className="text-lg font-semibold text-gray-900 mb-4">
                   크레딧 사용 내역 (최근 5개)
                 </h4>
@@ -230,6 +291,12 @@ export default function ProfilePage() {
                     </li>
                   ))}
                 </ul>
+              </div> */}
+
+              {/* 결제 ui */}
+              <div className="col-span-2">
+                <div id="toss-payment-methods" />
+                <div id="toss-payment-agreement" />
               </div>
             </div>
           </div>

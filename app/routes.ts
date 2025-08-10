@@ -16,8 +16,6 @@ export default [
   ]),
   layout("features/auth/layouts/auth-layout.tsx", [
     route("/auth/signin", "features/auth/pages/login-page.tsx"),
-    // route("/auth/signup/confirm", "features/auth/pages/email-confirm-page.tsx"),
-    // route("/auth/signup/complete", "features/auth/pages/signup-complete.tsx"),
     route("/auth/signup", "features/auth/pages/signup-page.tsx"),
     route("/auth/logout", "features/auth/pages/logout-loader.tsx"),
     ...prefix("/auth", [
@@ -30,4 +28,6 @@ export default [
       ]),
     ]),
   ]),
+  route("/credits/success", "features/profiles/pages/credit-success-page.tsx"),
+  route("/credits/fail", "features/profiles/pages/credit-fail-page.tsx"),
 ] satisfies RouteConfig;
