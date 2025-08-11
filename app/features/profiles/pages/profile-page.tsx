@@ -16,12 +16,34 @@ import { CreateOrder } from "../payment-api";
 import { makeSSRClient } from "~/supa-client";
 import { getLoggedInUserId } from "~/features/auth/quries";
 import type { Route } from "./+types/profile-page";
+import { getCredit } from "../credit-api";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   const userId = await getLoggedInUserId(client);
-  return { userId };
+  const token = await client.auth
+    .getSession()
+    .then((r) => r.data.session?.access_token);
+  if (!token) {
+    return { globalError: "로그인이 필요합니다." };
+  }
+  const credit = await getCredit(token);
+  return { userId, credit };
 };
+
+// 날짜 포맷팅 함수
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  return date.toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   const { user, token } = useOutletContext<{
     user: UserProfile;
@@ -166,7 +188,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
           </div>
 
           {/* 오른쪽 크레딧 및 구매 섹션 */}
-          <div className="lg:col-span-2 flex flex-col gap-8">
+          <div className="lg:col-span-2 flex flex-col gap-8 px-4">
             {/* 크레딧 잔액 카드 */}
             <div
               className="
@@ -174,7 +196,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
               bg-gradient-to-br from-orange-100 via-orange-200 to-orange-300
               shadow-md
               p-6
-              flex flex-col justify-between
+              flex flex-col
               text-orange-800
               relative
               overflow-hidden
@@ -182,28 +204,62 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
             "
             >
               {/* 카드 번호 디자인 */}
-              <div className="absolute top-4 right-6 text-xs font-mono tracking-widest opacity-30 select-none">
+              <div className="absolute top-6 right-8 text-xs font-mono tracking-widest opacity-25 select-none">
                 {fakeCardNumber}
               </div>
 
-              <div>
-                <p className="text-3xl font-bold tracking-tight">
-                  {credits.remained_credit} 크레딧
+              {/* 상단: 메인 크레딧 정보 */}
+              <div className="flex-1">
+                <p className="text-4xl font-bold tracking-tight mb-2">
+                  {loaderData.credit.remained_credit} 크레딧
                 </p>
-                <p className="text-sm font-semibold mt-1">
+                <p className="text-base font-semibold mb-4 opacity-90">
                   AI 서비스 이용 가능 시간:{" "}
-                  {credits.remained_credit * minutesPerCredit} 분
+                  {loaderData.credit.remained_credit * minutesPerCredit} 분
                 </p>
+
+                {/* API 연결 실패 시 안내 메시지 */}
+                {loaderData.credit.remained_credit === 0 &&
+                  !loaderData.credit.last_updated && (
+                    <p className="text-sm mt-3 opacity-70 bg-orange-200/50 px-3 py-2 rounded-lg">
+                      ⚠️ 크레딧 정보를 불러오지 못했습니다
+                    </p>
+                  )}
               </div>
 
-              <div className="flex justify-between items-center mt-6 text-sm font-medium">
-                <div className="flex items-center gap-1">
-                  <span className="text-xl">💳</span>
-                  <span>크레딧 잔액</span>
+              {/* 하단: 금액 정보와 상태 */}
+              <div className="space-y-3 border-t border-orange-300/30 pt-4">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">💳</span>
+                    <span className="font-semibold">크레딧 잔액</span>
+                  </div>
+                  <p className="text-xl font-bold">
+                    {loaderData.credit.remained_credit * pricePerCredit} 원
+                  </p>
                 </div>
-                <p className="text-lg font-semibold">
-                  {credits.remained_credit * pricePerCredit} 원
-                </p>
+
+                {/* 크레딧 상태 정보를 한 줄에 */}
+                <div className="flex justify-between items-center text-xs opacity-70">
+                  <div>
+                    {formatDate(loaderData.credit.last_updated) ? (
+                      <span>
+                        업데이트: {formatDate(loaderData.credit.last_updated)}
+                      </span>
+                    ) : (
+                      <span>정보 없음</span>
+                    )}
+                  </div>
+                  <div>
+                    {loaderData.credit.last_used ? (
+                      <span>
+                        최근 사용: {formatDate(loaderData.credit.last_used)}
+                      </span>
+                    ) : (
+                      <span>아직 사용하지 않음</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -215,53 +271,63 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
                   크레딧 구매
                 </h3>
 
-                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-6">
-                  {/* 구매할 크레딧 수 입력 */}
-                  <label
-                    htmlFor="credit-input"
-                    className="font-medium text-gray-700 text-sm whitespace-nowrap"
-                  >
-                    구매할 크레딧 수:
-                  </label>
+                <div className="space-y-4">
+                  {/* 첫 번째 줄: 크레딧 수 입력과 계산된 정보 */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4">
+                    {/* 왼쪽: 라벨 + 인풋 */}
+                    <div className="flex items-center gap-3">
+                      <label
+                        htmlFor="credit-input"
+                        className="font-medium text-gray-700 text-sm whitespace-nowrap"
+                      >
+                        구매할 크레딧 수:
+                      </label>
+                      <input
+                        id="credit-input"
+                        type="number"
+                        min={0}
+                        max={1000}
+                        value={buyAmount}
+                        onChange={(e) => {
+                          const inputValue = e.target.value;
+                          const num =
+                            inputValue === "" ? 0 : Number(inputValue);
+                          const val = Math.max(0, Math.min(1000, num));
+                          setBuyAmount(val);
+                        }}
+                        className="border border-gray-300 rounded px-3 py-2 w-24 text-center text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
 
-                  <input
-                    id="credit-input"
-                    type="number"
-                    min={0}
-                    max={1000}
-                    value={buyAmount}
-                    onChange={(e) => {
-                      const inputValue = e.target.value;
-                      const num = inputValue === "" ? 0 : Number(inputValue);
-                      const val = Math.max(0, Math.min(1000, num));
-                      setBuyAmount(val);
-                    }}
-                    className="border rounded px-3 py-1 w-20 text-center text-sm"
-                  />
+                    {/* 오른쪽: 카드 */}
+                    {buyAmount > 0 && (
+                      <div className="flex-1 bg-orange-50 rounded-lg p-3 sm:mt-0">
+                        <div className="flex items-center justify-between text-sm gap-4 flex-wrap">
+                          <div className="text-gray-600 flex gap-6">
+                            <div>
+                              총 금액:{" "}
+                              <span className="font-semibold text-orange-600">
+                                {totalPrice}원
+                              </span>
+                            </div>
+                            <div>
+                              이용시간:{" "}
+                              <span className="font-semibold">
+                                {totalMinutes}분
+                              </span>
+                            </div>
+                          </div>
 
-                  {/* 총 금액 및 이용 가능 시간 */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4 text-gray-700 text-sm mt-3 sm:mt-0">
-                    <p>
-                      총 금액:{" "}
-                      <span className="font-semibold text-orange-600">
-                        {totalPrice} 원
-                      </span>
-                    </p>
-                    <p>
-                      이용 가능 시간:{" "}
-                      <span className="font-semibold">{totalMinutes} 분</span>
-                    </p>
-                  </div>
-
-                  {/* 결제하기 버튼 */}
-                  <div className="mt-4 sm:mt-0 sm:ml-auto">
-                    <Button
-                      className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded shadow transition text-sm whitespace-nowrap"
-                      onClick={() => handlePayment(token, buyAmount)}
-                      disabled={buyAmount === 0}
-                    >
-                      결제하기
-                    </Button>
+                          <Button
+                            className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handlePayment(token, buyAmount)}
+                            disabled={buyAmount === 0}
+                          >
+                            결제하기
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
