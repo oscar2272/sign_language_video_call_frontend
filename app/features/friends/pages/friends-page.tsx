@@ -117,7 +117,7 @@ export default function FriendsPage() {
 
       {/* 탭 메뉴 */}
       <div className="flex border-b mb-6 space-x-4 justify-start">
-        {["받은 요청", "보낸 요청", "친구 목록", "유저 검색"].map((tab) => {
+        {["친구 목록", "보낸 요청", "받은 요청", "유저 검색"].map((tab) => {
           const key =
             tab === "받은 요청"
               ? "received"

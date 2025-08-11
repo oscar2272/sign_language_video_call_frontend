@@ -17,6 +17,7 @@ import { makeSSRClient } from "~/supa-client";
 import { getLoggedInUserId } from "~/features/auth/quries";
 import type { Route } from "./+types/profile-page";
 import { getCredit } from "../credit-api";
+import { toast } from "sonner";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
@@ -103,6 +104,13 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   // 1. 결제하기 버튼 onClick 핸들러
   async function handlePayment(token: string, buyAmount: number) {
     try {
+      const agreementChecked = (
+        widgets.current as any
+      )?.agreement?.getAgreementStatus?.()?.agreedRequired;
+      if (!agreementChecked) {
+        toast("결제를 진행하려면 필수 약관에 동의해주세요.");
+        return;
+      }
       // 2. 백엔드에 주문 생성 요청
 
       const { orderId, amount } = await CreateOrder(token, buyAmount);
