@@ -18,6 +18,8 @@ import { getLoggedInUserId } from "~/features/auth/quries";
 import type { Route } from "./+types/profile-page";
 import { getCredit } from "../credit-api";
 import { toast } from "sonner";
+import { Input } from "~/common/components/ui/input";
+import { Label } from "~/common/components/ui/label";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
@@ -284,13 +286,13 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4">
                     {/* 왼쪽: 라벨 + 인풋 */}
                     <div className="flex items-center gap-3">
-                      <label
+                      <Label
                         htmlFor="credit-input"
                         className="font-medium text-gray-700 text-sm whitespace-nowrap"
                       >
                         구매할 크레딧 수:
-                      </label>
-                      <input
+                      </Label>
+                      <Input
                         id="credit-input"
                         type="number"
                         min={0}

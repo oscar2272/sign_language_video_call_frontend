@@ -14,18 +14,17 @@ export default function Navigation() {
       <NavigationMenuList className="flex items-center gap-4">
         <NavigationMenuItem>
           <NavigationMenuLink asChild className={navigationMenuTriggerStyle()}>
-            <Link to="/call">Call</Link>
+            <Link to="/friends">연락처</Link>
           </NavigationMenuLink>
         </NavigationMenuItem>
         <NavigationMenuItem>
           <NavigationMenuLink asChild className={navigationMenuTriggerStyle()}>
-            <Link to="/friends">Friends</Link>
+            <Link to="/call-history">통화기록</Link>
           </NavigationMenuLink>
         </NavigationMenuItem>
-
         <NavigationMenuItem>
           <NavigationMenuLink asChild className={navigationMenuTriggerStyle()}>
-            <Link to="/profiles">Profile</Link>
+            <Link to="/profiles">마이페이지</Link>
           </NavigationMenuLink>
         </NavigationMenuItem>
       </NavigationMenuList>

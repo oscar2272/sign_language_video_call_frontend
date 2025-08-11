@@ -11,6 +11,7 @@ export default [
     index("common/pages/home-page.tsx"),
     route("/profiles", "features/profiles/pages/profile-page.tsx"),
     route("/profiles/edit", "features/profiles/pages/profile-edit-page.tsx"),
+    route("/call-history", "features/calls/pages/call-history-page.tsx"),
     route("/call", "features/calls/pages/call-page.tsx"),
 
     ...prefix("/friends", [index("features/friends/pages/friends-page.tsx")]),
