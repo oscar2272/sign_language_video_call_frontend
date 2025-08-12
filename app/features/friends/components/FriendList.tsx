@@ -7,7 +7,7 @@ import {
 import { Button } from "~/common/components/ui/button";
 import { Pagination } from "../pages/friends-page";
 
-const PAGE_SIZE = 3;
+const PAGE_SIZE = 10;
 
 export function FriendsList({
   relations,

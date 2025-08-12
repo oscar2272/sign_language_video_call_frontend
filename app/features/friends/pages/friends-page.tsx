@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Button } from "~/common/components/ui/button";
 import { ReceivedRequests } from "../components/ReceivedRequest";
 import { SentRequests } from "../components/SentRequests";
 import { FriendsList } from "../components/FriendList";
@@ -93,7 +92,6 @@ const dummyFriendRelations: FriendRelation[] = [
     status: "REJECTED",
   },
 ];
-
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   const token = await client.auth
@@ -106,7 +104,7 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   const friends = await getFriends(token);
   const receivedRequests = await getReceivedRequest(token);
   //console.log("sentRequests", sentRequests);
-  console.log("ReceivedRequest", receivedRequests);
+  //console.log("ReceivedRequest", receivedRequests);
   console.log("friends", friends);
   return { sentRequests };
 };
@@ -184,10 +182,7 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
           />
         )}
         {activeTab === "search" && (
-          <SearchUsers
-            users={dummyUsers}
-            onFriendRequest={(id) => console.log("친구 요청", id)}
-          />
+          <SearchUsers onFriendRequest={(id) => console.log("친구 요청", id)} />
         )}
       </div>
     </div>
