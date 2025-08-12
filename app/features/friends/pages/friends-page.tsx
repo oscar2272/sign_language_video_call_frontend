@@ -6,7 +6,7 @@ import { FriendsList } from "../components/FriendList";
 import { SearchUsers } from "../components/SearchUsers";
 import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/friends-page";
-import { getFriends, getSentRequest } from "../api";
+import { getFriends, getReceivedRequest, getSentRequest } from "../api";
 
 // 임시 데이터 예시
 const dummyUsers: UserProfile[] = [
@@ -104,8 +104,9 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   }
   const sentRequests = await getSentRequest(token);
   const friends = await getFriends(token);
+  const receivedRequests = await getReceivedRequest(token);
   //console.log("sentRequests", sentRequests);
-
+  console.log("ReceivedRequest", receivedRequests);
   console.log("friends", friends);
   return { sentRequests };
 };
