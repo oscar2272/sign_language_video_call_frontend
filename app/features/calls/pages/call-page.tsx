@@ -1,1 +1,1 @@
-export default function CallHistoryPage() {}
+export default function CallPage() {}

@@ -4,6 +4,9 @@ import { ReceivedRequests } from "../components/ReceivedRequest";
 import { SentRequests } from "../components/SentRequests";
 import { FriendsList } from "../components/FriendList";
 import { SearchUsers } from "../components/SearchUsers";
+import { makeSSRClient } from "~/supa-client";
+import type { Route } from "./+types/friends-page";
+import { getFriends, getSentRequest } from "../api";
 
 // 임시 데이터 예시
 const dummyUsers: UserProfile[] = [
@@ -91,7 +94,24 @@ const dummyFriendRelations: FriendRelation[] = [
   },
 ];
 
-export default function FriendsPage() {
+export const loader = async ({ request }: Route.LoaderArgs) => {
+  const { client } = makeSSRClient(request);
+  const token = await client.auth
+    .getSession()
+    .then((r) => r.data.session?.access_token);
+  if (!token) {
+    return { globalError: "로그인이 필요합니다." };
+  }
+  const sentRequests = await getSentRequest(token);
+  const friends = await getFriends(token);
+  //console.log("sentRequests", sentRequests);
+
+  console.log("friends", friends);
+  return { sentRequests };
+};
+
+export default function FriendsPage({ loaderData }: Route.ComponentProps) {
+  const sentRequests = loaderData.sentRequests.results || [];
   const currentUserId = 1;
 
   const [activeTab, setActiveTab] = useState<
@@ -113,7 +133,7 @@ export default function FriendsPage() {
   );
   return (
     <div className="px-10 mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Friend</h1>
+      <h1 className="text-2xl font-bold mb-4">연락처</h1>
 
       {/* 탭 메뉴 */}
       <div className="flex border-b mb-6 space-x-4 justify-start">
@@ -159,6 +179,7 @@ export default function FriendsPage() {
             relations={friendsRelations} // 친구 목록만 넘기기
             currentUserId={currentUserId}
             onDelete={() => {}}
+            onCall={() => {}}
           />
         )}
         {activeTab === "search" && (

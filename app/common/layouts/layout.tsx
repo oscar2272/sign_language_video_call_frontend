@@ -28,18 +28,17 @@ import { toast } from "sonner";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
-  const userId = await getLoggedInUserId(client);
-  if (userId == null) {
+  //const userId = await getLoggedInUserId(client);
+
+  const token = await client.auth
+    .getSession()
+    .then((r) => r.data.session?.access_token);
+  if (!token) {
     return redirect("/auth/signin");
-  } else {
-    const token = await client.auth
-      .getSession()
-      .then((r) => r.data.session?.access_token);
-    if (!token) return null;
-    const user = await getUserProfile(token);
-    const hasNotifications = true;
-    return { user, hasNotifications, token };
   }
+  const user = await getUserProfile(token);
+  const hasNotifications = true;
+  return { user, hasNotifications, token };
 };
 
 export default function Layout({ loaderData }: Route.ComponentProps) {

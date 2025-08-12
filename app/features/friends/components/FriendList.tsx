@@ -13,10 +13,12 @@ export function FriendsList({
   relations,
   currentUserId,
   onDelete,
+  onCall,
 }: {
   relations: FriendRelation[];
   currentUserId: number;
   onDelete: (id: number) => void;
+  onCall: (id: number) => void;
 }) {
   const [page, setPage] = useState(1);
 
@@ -68,13 +70,22 @@ export function FriendsList({
                   </p>
                 </div>
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => onDelete(rel.id)}
-              >
-                삭제
-              </Button>
+              <div className="flex space-x-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => onCall(rel.id)}
+                >
+                  통화
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => onDelete(rel.id)}
+                >
+                  삭제
+                </Button>
+              </div>
             </div>
           );
         })

@@ -138,7 +138,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-screen bg-gray-50 px-10">
       <div className=" mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-8">Profile</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-8">마이페이지</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* 왼쪽 프로필 섹션 (평면) */}
@@ -170,7 +170,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
                   asChild
                   className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded font-medium transition-colors"
                 >
-                  <Link to="/profiles/edit">프로필 변경</Link>
+                  <Link to="/profiles/edit">프로필 수정</Link>
                 </Button>
               </div>
 

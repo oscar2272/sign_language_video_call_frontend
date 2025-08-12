@@ -12,16 +12,15 @@ export const browserClient = createBrowserClient(
 
 export const makeSSRClient = (request: Request) => {
   const headers = new Headers();
+  const cookies = request.headers.get("Cookie") || "";
   const serverSideClient = createServerClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          const cookies = parseCookieHeader(
-            request.headers.get("Cookie") ?? ""
-          );
-          return cookies.map(({ name, value }) => ({
+          const parsed = parseCookieHeader(cookies);
+          return parsed.map(({ name, value }) => ({
             name,
             value: value ?? "",
           }));
@@ -37,8 +36,5 @@ export const makeSSRClient = (request: Request) => {
       },
     }
   );
-  return {
-    client: serverSideClient,
-    headers,
-  };
+  return { client: serverSideClient, headers };
 };
