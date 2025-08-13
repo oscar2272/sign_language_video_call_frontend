@@ -6,45 +6,51 @@ import {
 } from "~/common/components/ui/avatar";
 import { Button } from "~/common/components/ui/button";
 import { Pagination } from "../pages/friends-page";
+import { useFetcher } from "react-router";
 
 const PAGE_SIZE = 10;
 
+type FriendList = {
+  id: number;
+  email: string;
+  profile: {
+    nickname: string;
+    profile_image_url: string | null;
+  };
+};
+
 export function FriendsList({
-  relations,
-  currentUserId,
-  onDelete,
-  onCall,
+  friendsList,
+  friendsCount,
 }: {
-  relations: FriendRelation[];
-  currentUserId: number;
-  onDelete: (id: number) => void;
-  onCall: (id: number) => void;
+  friendsList: FriendList[];
+  friendsCount: number;
 }) {
   const [page, setPage] = useState(1);
+  const maxPage = Math.ceil(friendsCount / PAGE_SIZE);
+  const fetcher = useFetcher();
 
-  // 친구 목록에서 내 친구만 필터링 (ACCEPTED 상태)
-  const friends = relations.filter(
-    (rel) =>
-      rel.status === "ACCEPTED" &&
-      (rel.from_user.id === currentUserId || rel.to_user.id === currentUserId)
-  );
-
-  const maxPage = Math.ceil(friends.length / PAGE_SIZE);
-  const pageData = friends.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const handleDelete = (id: number) => {
+    if (fetcher.state !== "idle") return; // 중복 클릭 방지
+    const formData = new FormData();
+    formData.append("requestId", id.toString());
+    formData.append("actionType", "delete");
+    fetcher.submit(formData, { method: "post" });
+  };
 
   return (
     <div>
-      {pageData.length === 0 ? (
+      {friendsCount === 0 ? (
         <p className="text-center py-4">친구가 없습니다.</p>
       ) : (
-        pageData.map((rel) => {
-          // 상대방 유저 정보
-          const friend: UserProfile =
-            rel.from_user.id === currentUserId ? rel.to_user : rel.from_user;
+        friendsList.map((friend) => {
+          const isLoading =
+            fetcher.state !== "idle" &&
+            fetcher.formData?.get("requestId") === friend.id.toString();
 
           return (
             <div
-              key={rel.id}
+              key={friend.id}
               className="flex items-center justify-between border rounded p-3 mb-3"
             >
               <div className="flex items-center space-x-3 min-w-0">
@@ -70,27 +76,18 @@ export function FriendsList({
                   </p>
                 </div>
               </div>
-              <div className="flex space-x-2">
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => onCall(rel.id)}
-                >
-                  통화
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onDelete(rel.id)}
-                >
-                  삭제
-                </Button>
-              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => handleDelete(friend.id)}
+                disabled={isLoading}
+              >
+                {isLoading ? "로딩..." : "삭제"}
+              </Button>
             </div>
           );
         })
       )}
-
       {maxPage > 1 && (
         <Pagination page={page} maxPage={maxPage} onPageChange={setPage} />
       )}

@@ -42,3 +42,81 @@ export async function getFriends(token: string) {
   }
   return res.json();
 }
+
+export async function requestFriend(token: string, userId: number) {
+  const res = await fetch(`${FRIEND_API_URL}/requests/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to_user: userId,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to request friend");
+  }
+
+  return res.json();
+}
+
+export async function acceptFriendRequest(token: string, requestId: number) {
+  const res = await fetch(`${FRIEND_API_URL}/requests/${requestId}/accept/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
+
+export async function rejectFriendRequest(token: string, requestId: number) {
+  const res = await fetch(`${FRIEND_API_URL}/requests/${requestId}/reject/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
+
+export async function deleteFriend(token: string, requestId: number) {
+  const res = await fetch(`${FRIEND_API_URL}/${requestId}/`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return true;
+}
+
+export async function cancelFriendRequest(token: string, requestId: number) {
+  const res = await fetch(`${FRIEND_API_URL}/requests/${requestId}/`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return true;
+}

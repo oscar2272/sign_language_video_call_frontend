@@ -2,96 +2,61 @@ import { useState } from "react";
 import { ReceivedRequests } from "../components/ReceivedRequest";
 import { SentRequests } from "../components/SentRequests";
 import { FriendsList } from "../components/FriendList";
-import { SearchUsers } from "../components/SearchUsers";
 import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/friends-page";
-import { getFriends, getReceivedRequest, getSentRequest } from "../api";
+import {
+  acceptFriendRequest,
+  cancelFriendRequest,
+  deleteFriend,
+  getFriends,
+  getReceivedRequest,
+  getSentRequest,
+  rejectFriendRequest,
+  requestFriend,
+} from "../api";
+import { redirect } from "react-router";
+import { searchUsers } from "~/features/profiles/profile-api";
+import { SearchUsers } from "../components/SearchUsers";
+export const action = async ({ request }: Route.ActionArgs) => {
+  const formData = await request.formData();
+  const actionType = formData.get("actionType") as string | null;
+  const requestId = formData.get("requestId")
+    ? Number(formData.get("requestId"))
+    : null;
+  const searchQuery = formData.get("q") as string | null;
+  const { client } = makeSSRClient(request);
+  const token = await client.auth
+    .getSession()
+    .then((r) => r.data.session?.access_token);
+  if (!token) return redirect("/auth/signin");
 
-// 임시 데이터 예시
-const dummyUsers: UserProfile[] = [
-  {
-    id: 1,
-    email: "chulsoo@example.com",
-    profile: {
-      nickname: "철수",
-      profile_image_url: null,
-    },
-  },
-  {
-    id: 2,
-    email: "younghee@example.com",
-    profile: {
-      nickname: "영희",
-      profile_image_url: "https://randomuser.me/api/portraits/women/68.jpg",
-    },
-  },
-  {
-    id: 3,
-    email: "minsu@example.com",
-    profile: {
-      nickname: "민수",
-      profile_image_url: null,
-    },
-  },
-  {
-    id: 4,
-    email: "sujin@example.com",
-    profile: {
-      nickname: "수진",
-      profile_image_url: "https://randomuser.me/api/portraits/women/10.jpg",
-    },
-  },
-  {
-    id: 5,
-    email: "jaehyun@example.com",
-    profile: {
-      nickname: "재현",
-      profile_image_url: "https://randomuser.me/api/portraits/men/20.jpg",
-    },
-  },
-  {
-    id: 6,
-    email: "dahyun@example.com",
-    profile: {
-      nickname: "다현",
-      profile_image_url: null,
-    },
-  },
-];
+  switch (actionType) {
+    case "request":
+      if (requestId) await requestFriend(token, requestId);
+      break;
+    case "accept":
+      if (requestId) await acceptFriendRequest(token, requestId);
+      break;
+    case "reject":
+      if (requestId) await rejectFriendRequest(token, requestId);
+      break;
+    case "cancel":
+      if (requestId) await cancelFriendRequest(token, requestId);
+      break;
+    case "delete":
+      if (requestId) await deleteFriend(token, requestId);
+      break;
+    case "search":
+      if (searchQuery) {
+        const users = await searchUsers(token, searchQuery);
+        return { results: users }; // <-- 이렇게 wrapping
+      }
+    default:
+      console.warn("Unknown actionType", actionType);
+  }
 
-// 임시 친구 요청 데이터
-const dummyFriendRelations: FriendRelation[] = [
-  {
-    id: 1,
-    from_user: dummyUsers[0],
-    to_user: dummyUsers[1],
-    status: "PENDING",
-  },
-  {
-    id: 2,
-    from_user: dummyUsers[2],
-    to_user: dummyUsers[0],
-    status: "PENDING",
-  },
-  {
-    id: 3,
-    from_user: dummyUsers[0],
-    to_user: dummyUsers[3],
-    status: "ACCEPTED",
-  },
-  {
-    id: 4,
-    from_user: dummyUsers[4],
-    to_user: dummyUsers[0],
-    status: "ACCEPTED",
-  },
-  {
-    id: 5,
-    from_user: dummyUsers[0],
-    to_user: dummyUsers[5],
-    status: "REJECTED",
-  },
-];
+  return null;
+};
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   const token = await client.auth
@@ -100,13 +65,14 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   if (!token) {
     return { globalError: "로그인이 필요합니다." };
   }
-  const sentRequests = await getSentRequest(token);
+  const [sentRequests, friends, receivedRequests] = await Promise.all([
+    getSentRequest(token),
+    getFriends(token),
+    getReceivedRequest(token),
+  ]);
   const sentCount = sentRequests.count;
-  const friends = await getFriends(token);
   const friendsCount = friends.count;
-  const receivedRequests = await getReceivedRequest(token);
   const receivedCount = receivedRequests.count;
-  //console.log("friends", friends);
 
   return {
     sentRequests,
@@ -114,16 +80,17 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     sentCount,
     receivedCount,
     friendsCount,
+    friends,
   };
 };
 
 export default function FriendsPage({ loaderData }: Route.ComponentProps) {
   const sentRequests = loaderData.sentRequests || [];
   const receivedRequests = loaderData.receivedRequests || [];
+  const friendsList = loaderData.friends || [];
   const sentCount = loaderData.sentCount || 0;
   const receivedCount = loaderData.receivedCount || 0;
   const friendsCount = loaderData.friendsCount || 0;
-  const currentUserId = 1;
   const tabs = [
     { label: "친구 목록", key: "friends", count: friendsCount },
     { label: "보낸 요청", key: "sent", count: sentCount },
@@ -134,22 +101,9 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
   const [activeTab, setActiveTab] = useState<
     "received" | "sent" | "friends" | "search"
   >("received");
-  // const receivedRelations = dummyFriendRelations.filter(
-  //   (rel) => rel.to_user.id === currentUserId && rel.status === "PENDING"
-  // );
 
-  // const sentRelations = dummyFriendRelations.filter(
-  //   (rel) => rel.from_user.id === currentUserId && rel.status === "PENDING"
-  // );
-
-  // 친구 목록 (ACCEPTED)
-  const friendsRelations = dummyFriendRelations.filter(
-    (rel) =>
-      rel.status === "ACCEPTED" &&
-      (rel.from_user.id === currentUserId || rel.to_user.id === currentUserId)
-  );
   return (
-    <div className="px-10 mx-auto">
+    <div className="px-15 mx-auto">
       <h1 className="text-2xl font-bold mb-4">연락처</h1>
 
       {/* 탭 메뉴 */}
@@ -175,28 +129,18 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
           <ReceivedRequests
             receivedCount={receivedCount}
             receivedList={receivedRequests.results}
-            onAccept={() => {}}
-            onReject={() => {}}
           />
         )}
         {activeTab === "sent" && (
-          <SentRequests
-            sentCount={sentCount}
-            sentList={sentRequests.results}
-            onCancel={() => {}}
-          />
+          <SentRequests sentCount={sentCount} sentList={sentRequests.results} />
         )}
         {activeTab === "friends" && (
           <FriendsList
-            relations={friendsRelations} // 친구 목록만 넘기기
-            currentUserId={currentUserId}
-            onDelete={() => {}}
-            onCall={() => {}}
+            friendsList={friendsList.results} // 친구 목록만 넘기기
+            friendsCount={friendsCount}
           />
         )}
-        {activeTab === "search" && (
-          <SearchUsers onFriendRequest={(id) => console.log("친구 요청", id)} />
-        )}
+        {activeTab === "search" && <SearchUsers />}
       </div>
     </div>
   );

@@ -17,6 +17,21 @@ export async function getUserProfile(token: string) {
   }
   return res.json();
 }
+export async function searchUsers(token: string, Query: string) {
+  const res = await fetch(
+    `${USER_API_URL}/search/?q=${encodeURIComponent(Query)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  if (!res.ok) {
+    throw new Error("Failed to fetch profile");
+  }
+  return res.json();
+}
 
 export async function updateUserProfile(
   token: string,
@@ -39,11 +54,8 @@ export async function updateUserProfile(
   });
 
   if (!res.ok) {
-    // 에러 응답의 JSON 본문 읽기 시도
     const errorData = await res.json().catch(() => null);
     if (errorData) {
-      // 예: { nickname: ["이미 사용 중인 닉네임입니다."] } 이런 구조 예상
-      // 구체적인 에러 메시지를 에러로 던지기
       const firstKey = Object.keys(errorData)[0];
       const firstError = Array.isArray(errorData[firstKey])
         ? errorData[firstKey][0]

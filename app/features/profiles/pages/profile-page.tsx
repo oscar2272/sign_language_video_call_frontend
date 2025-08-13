@@ -136,7 +136,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 px-10">
+    <div className="min-h-screen bg-gray-50 px-15">
       <div className=" mx-auto">
         <h1 className="text-2xl font-bold text-gray-900 mb-8">마이페이지</h1>
 

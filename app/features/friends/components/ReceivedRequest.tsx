@@ -1,15 +1,17 @@
+import { useState } from "react";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
 } from "~/common/components/ui/avatar";
 import { Button } from "~/common/components/ui/button";
-import { useState } from "react";
 import { Pagination } from "../pages/friends-page";
+import { useFetcher } from "react-router";
 
 const PAGE_SIZE = 10;
 
 type ReceivedList = {
+  id: number;
   from_user: {
     id: number;
     email: string;
@@ -23,24 +25,34 @@ type ReceivedList = {
 export function ReceivedRequests({
   receivedList,
   receivedCount,
-  onAccept,
-  onReject,
 }: {
   receivedList: ReceivedList[];
   receivedCount: number;
-  onAccept: (id: number) => void;
-  onReject: (id: number) => void;
 }) {
   const [page, setPage] = useState(1);
   const maxPage = Math.ceil(receivedCount / PAGE_SIZE);
+  const fetcher = useFetcher();
+
+  const handleAction = (id: number, actionType: "accept" | "reject") => {
+    if (fetcher.state !== "idle") return; // 중복 클릭 방지
+    const formData = new FormData();
+    formData.append("requestId", id.toString());
+    formData.append("actionType", actionType);
+    fetcher.submit(formData, { method: "post" });
+  };
 
   return (
     <div>
       {receivedCount === 0 ? (
         <p className="text-center py-4">받은 친구 요청이 없습니다.</p>
       ) : (
-        receivedList.map((relation: any) => {
+        receivedList.map((relation) => {
           const user = relation.from_user;
+
+          // 현재 이 버튼이 로딩 중인지 체크
+          const isLoading =
+            fetcher.state !== "idle" &&
+            fetcher.formData?.get("requestId") === relation.id.toString();
 
           return (
             <div
@@ -72,23 +84,28 @@ export function ReceivedRequests({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onAccept(relation.id)}
+                  onClick={() => handleAction(relation.id, "accept")}
+                  disabled={isLoading}
                 >
-                  수락
+                  {isLoading && fetcher.formData?.get("actionType") === "accept"
+                    ? "로딩..."
+                    : "수락"}
                 </Button>
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => onReject(relation.id)}
+                  onClick={() => handleAction(relation.id, "reject")}
+                  disabled={isLoading}
                 >
-                  거절
+                  {isLoading && fetcher.formData?.get("actionType") === "reject"
+                    ? "로딩..."
+                    : "거절"}
                 </Button>
               </div>
             </div>
           );
         })
       )}
-
       {maxPage > 1 && (
         <Pagination page={page} maxPage={maxPage} onPageChange={setPage} />
       )}

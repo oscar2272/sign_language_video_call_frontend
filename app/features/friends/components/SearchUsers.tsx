@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useState, useEffect } from "react";
+import { useSearchParams, useFetcher } from "react-router";
 import { Pagination } from "../pages/friends-page";
 import {
   Avatar,
@@ -8,8 +8,7 @@ import {
 } from "~/common/components/ui/avatar";
 import { Button } from "~/common/components/ui/button";
 
-const PAGE_SIZE = 5; // 한 페이지에 보여줄 유저 수
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const PAGE_SIZE = 5;
 
 interface UserProfile {
   id: number;
@@ -18,57 +17,57 @@ interface UserProfile {
     nickname: string;
     profile_image_url?: string | null;
   };
+  is_friend: boolean;
+  request_sent: boolean;
 }
 
-export function SearchUsers({
-  onFriendRequest,
-}: {
-  onFriendRequest: (userId: number) => void;
-}) {
+export function SearchUsers() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSearchTerm = searchParams.get("q") || "";
-  const initialPage = Number(searchParams.get("page") || "1");
-
-  const [query, setQuery] = useState(initialSearchTerm);
-  const searchTerm = searchParams.get("q") || "";
   const page = Number(searchParams.get("page") || "1");
 
-  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  // 백엔드에서 한 번에 전체 검색 결과를 받는다고 가정
+  // URL과 동기화된 검색어 상태
+  const [query, setQuery] = useState(searchParams.get("q") || "");
   useEffect(() => {
-    if (searchTerm.trim() === "") {
-      setAllUsers([]);
-      return;
-    }
-    setLoading(true);
-    fetch(`${BASE_URL}/api/users/search?q=${encodeURIComponent(searchTerm)}`)
-      .then((res) => res.json())
-      .then((data: UserProfile[]) => {
-        setAllUsers(data ?? []);
-      })
-      .finally(() => setLoading(false));
-  }, [searchTerm]);
+    setQuery(searchParams.get("q") || "");
+  }, [searchParams]);
 
-  // 페이지별로 보여줄 데이터 슬라이스
-  const maxPage = Math.ceil(allUsers.length / PAGE_SIZE);
-  const pageData = allUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const fetcher = useFetcher<{ results: UserProfile[] }>();
+
+  // 버튼별 로딩 상태
+  const [loadingUserId, setLoadingUserId] = useState<number | null>(null);
 
   const onChangeQuery = (e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);
   };
 
   const onSearchClick = () => {
+    const formData = new FormData();
+    formData.append("q", query);
+    formData.append("actionType", "search");
+    fetcher.submit(formData, { method: "post" });
     setSearchParams({ q: query, page: "1" });
   };
 
   const onPageChange = (newPage: number) => {
-    setSearchParams({ q: searchTerm, page: newPage.toString() });
+    setSearchParams({ q: query, page: newPage.toString() });
   };
+
+  const users = fetcher.data?.results || [];
+  const maxPage = Math.ceil(users.length / PAGE_SIZE);
+  const pageData = users.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // fetcher idle이면 버튼 로딩 초기화
+  useEffect(() => {
+    if (fetcher.state === "idle") {
+      setLoadingUserId(null);
+    }
+  }, [fetcher.state]);
+
+  const loadingSearch = fetcher.state !== "idle" && loadingUserId === null;
 
   return (
     <div>
+      {/* 검색 입력 */}
       <div className="flex space-x-2 mb-4">
         <input
           type="text"
@@ -80,15 +79,16 @@ export function SearchUsers({
             if (e.key === "Enter") onSearchClick();
           }}
         />
-        <Button onClick={onSearchClick}>검색</Button>
+        <Button onClick={onSearchClick} disabled={loadingSearch}>
+          {loadingSearch ? "검색 중..." : "검색"}
+        </Button>
       </div>
 
-      {/*loading && <p>검색 중...</p>*/}
-
-      {!loading && pageData.length === 0 && searchTerm !== "" && (
+      {!loadingSearch && pageData.length === 0 && query !== "" && (
         <p className="text-center py-4">검색 결과가 없습니다.</p>
       )}
 
+      {/* 검색 결과 */}
       {pageData.map((user) => (
         <div
           key={user.id}
@@ -115,12 +115,34 @@ export function SearchUsers({
               <p className="text-sm text-gray-500 truncate">{user.email}</p>
             </div>
           </div>
-          <Button size="sm" onClick={() => onFriendRequest(user.id)}>
-            친구 요청
-          </Button>
+
+          <fetcher.Form
+            method="post"
+            onSubmit={() => setLoadingUserId(user.id)}
+          >
+            <input type="hidden" name="requestId" value={user.id} />
+            <input type="hidden" name="actionType" value="request" />
+
+            <Button
+              type="submit"
+              size="sm"
+              disabled={
+                loadingUserId === user.id || user.is_friend || user.request_sent
+              }
+            >
+              {user.is_friend
+                ? "친구"
+                : user.request_sent
+                  ? "요청 완료"
+                  : loadingUserId === user.id
+                    ? "요청 중..."
+                    : "친구 요청"}
+            </Button>
+          </fetcher.Form>
         </div>
       ))}
 
+      {/* 페이지네이션 */}
       {maxPage > 1 && (
         <Pagination page={page} maxPage={maxPage} onPageChange={onPageChange} />
       )}
