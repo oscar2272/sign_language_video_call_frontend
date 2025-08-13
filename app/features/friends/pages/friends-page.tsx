@@ -101,28 +101,46 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     return { globalError: "로그인이 필요합니다." };
   }
   const sentRequests = await getSentRequest(token);
+  const sentCount = sentRequests.count;
   const friends = await getFriends(token);
+  const friendsCount = friends.count;
   const receivedRequests = await getReceivedRequest(token);
-  //console.log("sentRequests", sentRequests);
-  //console.log("ReceivedRequest", receivedRequests);
-  console.log("friends", friends);
-  return { sentRequests };
+  const receivedCount = receivedRequests.count;
+  //console.log("friends", friends);
+
+  return {
+    sentRequests,
+    receivedRequests,
+    sentCount,
+    receivedCount,
+    friendsCount,
+  };
 };
 
 export default function FriendsPage({ loaderData }: Route.ComponentProps) {
-  const sentRequests = loaderData.sentRequests.results || [];
+  const sentRequests = loaderData.sentRequests || [];
+  const receivedRequests = loaderData.receivedRequests || [];
+  const sentCount = loaderData.sentCount || 0;
+  const receivedCount = loaderData.receivedCount || 0;
+  const friendsCount = loaderData.friendsCount || 0;
   const currentUserId = 1;
+  const tabs = [
+    { label: "친구 목록", key: "friends", count: friendsCount },
+    { label: "보낸 요청", key: "sent", count: sentCount },
+    { label: "받은 요청", key: "received", count: receivedCount },
+    { label: "유저 검색", key: "search" },
+  ];
 
   const [activeTab, setActiveTab] = useState<
     "received" | "sent" | "friends" | "search"
   >("received");
-  const receivedRelations = dummyFriendRelations.filter(
-    (rel) => rel.to_user.id === currentUserId && rel.status === "PENDING"
-  );
+  // const receivedRelations = dummyFriendRelations.filter(
+  //   (rel) => rel.to_user.id === currentUserId && rel.status === "PENDING"
+  // );
 
-  const sentRelations = dummyFriendRelations.filter(
-    (rel) => rel.from_user.id === currentUserId && rel.status === "PENDING"
-  );
+  // const sentRelations = dummyFriendRelations.filter(
+  //   (rel) => rel.from_user.id === currentUserId && rel.status === "PENDING"
+  // );
 
   // 친구 목록 (ACCEPTED)
   const friendsRelations = dummyFriendRelations.filter(
@@ -136,42 +154,37 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
 
       {/* 탭 메뉴 */}
       <div className="flex border-b mb-6 space-x-4 justify-start">
-        {["친구 목록", "보낸 요청", "받은 요청", "유저 검색"].map((tab) => {
-          const key =
-            tab === "받은 요청"
-              ? "received"
-              : tab === "보낸 요청"
-                ? "sent"
-                : tab === "친구 목록"
-                  ? "friends"
-                  : "search";
-          return (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key as any)}
-              className={`text-center px-3 py-1 text-sm -mb-px border-b-2 ${
-                activeTab === key
-                  ? "border-blue-600 font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {tab}
-            </button>
-          );
-        })}
+        {tabs.map(({ label, key, count }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key as any)}
+            className={`text-center px-3 py-1 text-sm -mb-px border-b-2 ${
+              activeTab === key
+                ? "border-blue-600 font-semibold"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {label} {count !== undefined ? `(${count})` : ""}
+          </button>
+        ))}
       </div>
 
       {/* 컨텐츠 영역 */}
       <div>
         {activeTab === "received" && (
           <ReceivedRequests
-            relations={receivedRelations}
+            receivedCount={receivedCount}
+            receivedList={receivedRequests.results}
             onAccept={() => {}}
             onReject={() => {}}
           />
         )}
         {activeTab === "sent" && (
-          <SentRequests relations={sentRelations} onCancel={() => {}} />
+          <SentRequests
+            sentCount={sentCount}
+            sentList={sentRequests.results}
+            onCancel={() => {}}
+          />
         )}
         {activeTab === "friends" && (
           <FriendsList

@@ -8,48 +8,59 @@ import { useState } from "react";
 import { Pagination } from "../pages/friends-page";
 
 const PAGE_SIZE = 10;
-
+type SentList = {
+  from_user: {
+    id: number;
+    email: string;
+    profile: {
+      nickname: string;
+      profile_image_url: string | null;
+    };
+  };
+};
 export function SentRequests({
-  relations,
+  sentList,
+  sentCount,
   onCancel,
 }: {
-  relations: FriendRelation[];
+  sentList: SentList[];
+  sentCount: number;
   onCancel: (id: number) => void;
 }) {
+  console.log("SentRequests sentList:", sentList);
   const [page, setPage] = useState(1);
-  const maxPage = Math.ceil(relations.length / PAGE_SIZE);
-  const pageData = relations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const maxPage = Math.ceil(sentCount / PAGE_SIZE);
 
   return (
     <div>
-      {pageData.length === 0 ? (
+      {sentCount === 0 ? (
         <p className="text-center py-4">보낸 친구 요청이 없습니다.</p>
       ) : (
-        pageData.map((relation) => {
+        sentList.map((relation: any) => {
           const user = relation.to_user;
 
           return (
             <div
               key={relation.id}
-              className="flex items-center justify-between border rounded p-3 mb-3"
+              className="flex items-center justify-between border rounded p-3 mb-3 "
             >
               <div className="flex items-center space-x-3 min-w-0">
                 <Avatar className="w-12 h-12">
-                  {user.profile?.profile_image_url ? (
+                  {user.profile.profile_image_url ? (
                     <AvatarImage
                       src={user.profile.profile_image_url}
-                      alt={user.profile.nickname || user.email}
+                      alt={user.profile.nickname}
                       className="object-cover"
                     />
                   ) : (
                     <AvatarFallback className="text-2xl">
-                      {user.profile.nickname?.[0] || user.email[0]}
+                      {user.profile.nickname?.[0]}
                     </AvatarFallback>
                   )}
                 </Avatar>
                 <div className="truncate">
                   <p className="font-semibold truncate">
-                    {user.profile.nickname || "-"}
+                    {user.profile.nickname}
                   </p>
                   <p className="text-sm text-gray-500 truncate">{user.email}</p>
                 </div>

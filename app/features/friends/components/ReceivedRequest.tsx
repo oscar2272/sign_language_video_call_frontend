@@ -9,25 +9,37 @@ import { Pagination } from "../pages/friends-page";
 
 const PAGE_SIZE = 10;
 
+type ReceivedList = {
+  from_user: {
+    id: number;
+    email: string;
+    profile: {
+      nickname: string;
+      profile_image_url: string | null;
+    };
+  };
+};
+
 export function ReceivedRequests({
-  relations,
+  receivedList,
+  receivedCount,
   onAccept,
   onReject,
 }: {
-  relations: FriendRelation[];
+  receivedList: ReceivedList[];
+  receivedCount: number;
   onAccept: (id: number) => void;
   onReject: (id: number) => void;
 }) {
   const [page, setPage] = useState(1);
-  const maxPage = Math.ceil(relations.length / PAGE_SIZE);
-  const pageData = relations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const maxPage = Math.ceil(receivedCount / PAGE_SIZE);
 
   return (
     <div>
-      {pageData.length === 0 ? (
+      {receivedCount === 0 ? (
         <p className="text-center py-4">받은 친구 요청이 없습니다.</p>
       ) : (
-        pageData.map((relation) => {
+        receivedList.map((relation: any) => {
           const user = relation.from_user;
 
           return (
