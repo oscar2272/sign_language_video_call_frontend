@@ -20,8 +20,11 @@ interface UserProfile {
   is_friend: boolean;
   request_sent: boolean;
 }
+interface SearchUsersProps {
+  userId: number;
+}
 
-export function SearchUsers() {
+export function SearchUsers({ userId }: SearchUsersProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get("page") || "1");
 
@@ -89,58 +92,65 @@ export function SearchUsers() {
       )}
 
       {/* 검색 결과 */}
-      {pageData.map((user) => (
-        <div
-          key={user.id}
-          className="flex items-center justify-between border rounded p-3 mb-3"
-        >
-          <div className="flex items-center space-x-3 min-w-0">
-            <Avatar className="w-12 h-12">
-              {user.profile.profile_image_url ? (
-                <AvatarImage
-                  src={user.profile.profile_image_url}
-                  alt={user.profile.nickname || user.email}
-                  className="object-cover"
-                />
-              ) : (
-                <AvatarFallback className="text-2xl flex items-center justify-center bg-gray-300 rounded-full">
-                  {user.profile.nickname?.[0] || user.email[0]}
-                </AvatarFallback>
-              )}
-            </Avatar>
-            <div className="truncate">
-              <p className="font-semibold truncate">
-                {user.profile.nickname || "-"}
-              </p>
-              <p className="text-sm text-gray-500 truncate">{user.email}</p>
-            </div>
-          </div>
+      {pageData.map((user) => {
+        const isMe = user.id === userId;
 
-          <fetcher.Form
-            method="post"
-            onSubmit={() => setLoadingUserId(user.id)}
+        return (
+          <div
+            key={user.id}
+            className="flex items-center justify-between border rounded p-3 mb-3"
           >
-            <input type="hidden" name="requestId" value={user.id} />
-            <input type="hidden" name="actionType" value="request" />
+            <div className="flex items-center space-x-3 min-w-0">
+              <Avatar className="w-12 h-12">
+                {user.profile.profile_image_url ? (
+                  <AvatarImage
+                    src={user.profile.profile_image_url}
+                    alt={user.profile.nickname || user.email}
+                    className="object-cover"
+                  />
+                ) : (
+                  <AvatarFallback className="text-2xl flex items-center justify-center bg-gray-300 rounded-full">
+                    {user.profile.nickname?.[0] || user.email[0]}
+                  </AvatarFallback>
+                )}
+              </Avatar>
+              <div className="truncate">
+                <p className="font-semibold truncate">
+                  {user.profile.nickname || "-"}
+                </p>
+                <p className="text-sm text-gray-500 truncate">{user.email}</p>
+              </div>
+            </div>
 
-            <Button
-              type="submit"
-              size="sm"
-              disabled={
-                loadingUserId === user.id || user.is_friend || user.request_sent
-              }
-            >
-              {user.is_friend
-                ? "친구"
-                : user.request_sent
-                  ? "요청 완료"
-                  : loadingUserId === user.id
-                    ? "요청 중..."
-                    : "친구 요청"}
-            </Button>
-          </fetcher.Form>
-        </div>
-      ))}
+            {!isMe && (
+              <fetcher.Form
+                method="post"
+                onSubmit={() => setLoadingUserId(user.id)}
+              >
+                <input type="hidden" name="requestId" value={user.id} />
+                <input type="hidden" name="actionType" value="request" />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    loadingUserId === user.id ||
+                    user.is_friend ||
+                    user.request_sent
+                  }
+                >
+                  {user.is_friend
+                    ? "친구"
+                    : user.request_sent
+                      ? "요청 완료"
+                      : loadingUserId === user.id
+                        ? "요청 중..."
+                        : "친구 요청"}
+                </Button>
+              </fetcher.Form>
+            )}
+          </div>
+        );
+      })}
 
       {/* 페이지네이션 */}
       {maxPage > 1 && (

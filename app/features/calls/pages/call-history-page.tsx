@@ -1,12 +1,25 @@
 import React from "react";
-import { Phone, PhoneCall, Clock } from "lucide-react";
+import { Phone, PhoneCall, Clock, Info, InfoIcon } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
 } from "~/common/components/ui/avatar";
 import { Button } from "~/common/components/ui/button";
-
+import type { Route } from "./+types/call-history-page";
+import { getCallHistoryList } from "../api";
+import { makeSSRClient } from "~/supa-client";
+export const loader = async ({ request }: Route.LoaderArgs) => {
+  const { client } = makeSSRClient(request);
+  const token = await client.auth
+    .getSession()
+    .then((r) => r.data.session?.access_token);
+  if (!token) {
+    return { globalError: "로그인이 필요합니다." };
+  }
+  const callHistory = await getCallHistoryList(token);
+  console.log("callHistory", callHistory);
+};
 export default function CallHistoryPage() {
   // 샘플 데이터 - 실제로는 props나 상태로 받아올 예정
   const callHistory = [
@@ -135,7 +148,7 @@ export default function CallHistoryPage() {
                   console.log("통화하기:", call.user.profile.nickname)
                 }
               >
-                <Phone className="w-4 h-4" />
+                <InfoIcon className="w-4 h-4 text-blue-500" />
               </Button>
             </div>
           ))}

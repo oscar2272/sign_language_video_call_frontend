@@ -14,7 +14,7 @@ import {
   rejectFriendRequest,
   requestFriend,
 } from "../api";
-import { redirect } from "react-router";
+import { redirect, useOutletContext } from "react-router";
 import { searchUsers } from "~/features/profiles/profile-api";
 import { SearchUsers } from "../components/SearchUsers";
 export const action = async ({ request }: Route.ActionArgs) => {
@@ -52,7 +52,6 @@ export const action = async ({ request }: Route.ActionArgs) => {
         return { results: users }; // <-- 이렇게 wrapping
       }
     default:
-      console.warn("Unknown actionType", actionType);
   }
 
   return null;
@@ -85,6 +84,10 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
 };
 
 export default function FriendsPage({ loaderData }: Route.ComponentProps) {
+  const { user, token } = useOutletContext<{
+    user: UserProfile;
+    token: string;
+  }>();
   const sentRequests = loaderData.sentRequests || [];
   const receivedRequests = loaderData.receivedRequests || [];
   const friendsList = loaderData.friends || [];
@@ -140,7 +143,7 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
             friendsCount={friendsCount}
           />
         )}
-        {activeTab === "search" && <SearchUsers />}
+        {activeTab === "search" && <SearchUsers userId={user.id} />}
       </div>
     </div>
   );
