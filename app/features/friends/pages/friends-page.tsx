@@ -17,6 +17,7 @@ import {
 import { redirect, useOutletContext } from "react-router";
 import { searchUsers } from "~/features/profiles/profile-api";
 import { SearchUsers } from "../components/SearchUsers";
+import { callFriends } from "~/features/calls/api";
 export const action = async ({ request }: Route.ActionArgs) => {
   const formData = await request.formData();
   const actionType = formData.get("actionType") as string | null;
@@ -49,9 +50,16 @@ export const action = async ({ request }: Route.ActionArgs) => {
     case "search":
       if (searchQuery) {
         const users = await searchUsers(token, searchQuery);
+        console.log("users", users);
         return { results: users }; // <-- 이렇게 wrapping
       }
-    default:
+    case "call":
+      if (requestId) {
+        const callJson = await callFriends(token, requestId);
+        const roomId = callJson.room_id;
+
+        return redirect(`/call/${roomId}`);
+      }
   }
 
   return null;
@@ -72,7 +80,6 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   const sentCount = sentRequests.count;
   const friendsCount = friends.count;
   const receivedCount = receivedRequests.count;
-
   return {
     sentRequests,
     receivedRequests,

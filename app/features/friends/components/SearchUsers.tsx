@@ -18,7 +18,7 @@ interface UserProfile {
     profile_image_url?: string | null;
   };
   is_friend: boolean;
-  request_sent: boolean;
+  friend_request_status: string;
 }
 interface SearchUsersProps {
   userId: number;
@@ -135,16 +135,19 @@ export function SearchUsers({ userId }: SearchUsersProps) {
                   disabled={
                     loadingUserId === user.id ||
                     user.is_friend ||
-                    user.request_sent
+                    user.friend_request_status === "PENDING_SENT" ||
+                    user.friend_request_status === "PENDING_RECEIVED"
                   }
                 >
                   {user.is_friend
                     ? "친구"
-                    : user.request_sent
-                      ? "요청 완료"
-                      : loadingUserId === user.id
-                        ? "요청 중..."
-                        : "친구 요청"}
+                    : user.friend_request_status === "PENDING_SENT"
+                      ? "요청 중"
+                      : user.friend_request_status === "PENDING_RECEIVED"
+                        ? "받은 요청"
+                        : loadingUserId === user.id
+                          ? "요청 중..."
+                          : "친구 요청"}
                 </Button>
               </fetcher.Form>
             )}

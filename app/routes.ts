@@ -12,7 +12,11 @@ export default [
     route("/profiles", "features/profiles/pages/profile-page.tsx"),
     route("/profiles/edit", "features/profiles/pages/profile-edit-page.tsx"),
     route("/call-history", "features/calls/pages/call-history-page.tsx"),
-    route("/call", "features/calls/pages/call-page.tsx"),
+    route(
+      "/call-history/:id",
+      "features/calls/pages/call-history-detail-page.tsx"
+    ),
+    route("/call/:id", "features/calls/pages/call-page.tsx"),
 
     ...prefix("/friends", [index("features/friends/pages/friends-page.tsx")]),
   ]),

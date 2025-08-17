@@ -1,18 +1,10 @@
 import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/layout";
-import { getLoggedInUserId } from "~/features/auth/quries";
 import { Link, Outlet, redirect } from "react-router";
 import { Button } from "../components/ui/button";
-import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-  navigationMenuTriggerStyle,
-} from "../components/ui/navigation-menu";
+
 import Navigation from "../components/navigations";
 import { getUserProfile } from "~/features/profiles/profile-api";
-import type { UserProfile } from "~/features/profiles/type";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
   DropdownMenu,
@@ -22,7 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { DropdownMenuItemIndicator } from "@radix-ui/react-dropdown-menu";
 import { BellIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -141,7 +132,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
       </header>
 
       {/* Content */}
-      <main className="flex-1 pt-20 xl:px-32 lg:px-24 md:px-16 px-8">
+      <main className="flex-1 pt-20 xl:px-40 lg:px-32 md:px-16 px-8">
         <Outlet context={{ user: loaderData!.user, token }} />
       </main>
     </div>

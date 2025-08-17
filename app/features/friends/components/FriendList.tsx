@@ -38,6 +38,13 @@ export function FriendsList({
     fetcher.submit(formData, { method: "post" });
   };
 
+  const handleCall = (id: number) => {
+    const formData = new FormData();
+    formData.append("requestId", id.toString());
+    formData.append("actionType", "call");
+    fetcher.submit(formData, { method: "post" });
+  };
+
   return (
     <div>
       {friendsCount === 0 ? (
@@ -76,14 +83,23 @@ export function FriendsList({
                   </p>
                 </div>
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleDelete(friend.id)}
-                disabled={isLoading}
-              >
-                {isLoading ? "로딩..." : "삭제"}
-              </Button>
+              <div className="space-x-2">
+                <Button
+                  size="sm"
+                  onClick={() => handleCall(friend.id)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? "로딩..." : "통화"}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDelete(friend.id)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? "로딩..." : "삭제"}
+                </Button>
+              </div>
             </div>
           );
         })
