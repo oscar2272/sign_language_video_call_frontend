@@ -69,6 +69,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
 
   const widgets = useRef<TossPaymentsWidgets | null>(null);
   const initedToss = useRef<boolean>(false);
+  const [agreed, setAgreed] = useState(false);
   useEffect(() => {
     const initToss = async () => {
       const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY;
@@ -85,8 +86,14 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
       await widgets.current.renderPaymentMethods({
         selector: "#toss-payment-methods",
       });
-      await widgets.current.renderAgreement({
+      const agreementWidget = await widgets.current.renderAgreement({
         selector: "#toss-payment-agreement",
+        variantKey: "AGREEMENT",
+      });
+
+      // 이벤트로 동의 상태 추적
+      agreementWidget.on("agreementStatusChange", (status) => {
+        setAgreed(status.agreedRequiredTerms);
       });
     };
     initToss();
@@ -106,14 +113,10 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   // 1. 결제하기 버튼 onClick 핸들러
   async function handlePayment(token: string, buyAmount: number) {
     try {
-      const agreementChecked = (
-        widgets.current as any
-      )?.agreement?.getAgreementStatus?.()?.agreedRequired;
-      if (!agreementChecked) {
-        toast("결제를 진행하려면 필수 약관에 동의해주세요.");
+      if (!agreed) {
+        toast("필수 약관에 동의해주세요.");
         return;
       }
-      // 2. 백엔드에 주문 생성 요청
 
       const { orderId, amount } = await CreateOrder(token, buyAmount);
 

@@ -138,6 +138,15 @@ export function SearchUsers({ userId }: SearchUsersProps) {
                     user.friend_request_status === "PENDING_SENT" ||
                     user.friend_request_status === "PENDING_RECEIVED"
                   }
+                  variant={
+                    user.is_friend
+                      ? "default"
+                      : user.friend_request_status === "PENDING_SENT"
+                        ? "outline" // 요청 중 → 연한 느낌
+                        : user.friend_request_status === "PENDING_RECEIVED"
+                          ? "outline" // 받은 요청 → 강조 느낌
+                          : "default"
+                  }
                 >
                   {user.is_friend
                     ? "친구"
