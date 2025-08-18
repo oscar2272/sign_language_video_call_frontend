@@ -4,8 +4,9 @@ import type { Route } from "./+types/social-start-page";
 import { makeSSRClient } from "~/supa-client";
 
 const isDev = import.meta.env.DEV;
-const BASE_URL = import.meta.env.VITE_BASE_URL ?? "..";
-const DEV_BASE_URL = "http://localhost:5173";
+const currentUrl = import.meta.env.DEV
+  ? import.meta.env.VITE_DEV_API_BASE_URL
+  : import.meta.env.VITE_API_BASE_URL;
 
 const paramsSchema = z.object({
   provider: z.enum(["github", "kakao"]),
@@ -18,7 +19,6 @@ export const loader = async ({ params, request }: Route.LoaderArgs) => {
   }
 
   const { provider } = data;
-  const currentUrl = isDev ? DEV_BASE_URL : BASE_URL;
   const redirectTo = `${currentUrl}/auth/social/${provider}/complete`;
 
   const { client, headers } = makeSSRClient(request);

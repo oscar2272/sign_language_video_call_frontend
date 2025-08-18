@@ -69,7 +69,9 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
 
   const widgets = useRef<TossPaymentsWidgets | null>(null);
   const initedToss = useRef<boolean>(false);
-  const [agreed, setAgreed] = useState(false);
+  const agreementWidgetRef = useRef<any>(null);
+  const [agreed, setAgreed] = useState(true);
+
   useEffect(() => {
     const initToss = async () => {
       const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY;
@@ -91,7 +93,9 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
         variantKey: "AGREEMENT",
       });
 
-      // 이벤트로 동의 상태 추적
+      agreementWidgetRef.current = agreementWidget;
+
+      // 이벤트 연결
       agreementWidget.on("agreementStatusChange", (status) => {
         setAgreed(status.agreedRequiredTerms);
       });

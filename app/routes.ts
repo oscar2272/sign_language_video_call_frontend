@@ -16,7 +16,7 @@ export default [
       "/call-history/:id",
       "features/calls/pages/call-history-detail-page.tsx"
     ),
-    route("/call/:id", "features/calls/pages/call-page.tsx"),
+    route("/call/:id?", "features/calls/pages/call-page.tsx"),
 
     ...prefix("/friends", [index("features/friends/pages/friends-page.tsx")]),
   ]),
