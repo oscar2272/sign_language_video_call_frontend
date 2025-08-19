@@ -3,10 +3,7 @@ import { z } from "zod";
 import type { Route } from "./+types/social-start-page";
 import { makeSSRClient } from "~/supa-client";
 
-const isDev = import.meta.env.DEV;
-const currentUrl = import.meta.env.DEV
-  ? import.meta.env.VITE_DEV_API_BASE_URL
-  : import.meta.env.VITE_API_BASE_URL;
+const currentUrl = import.meta.env.VITE_API_BASE_URL;
 
 const paramsSchema = z.object({
   provider: z.enum(["github", "kakao"]),
