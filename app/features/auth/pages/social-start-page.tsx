@@ -3,21 +3,23 @@ import { z } from "zod";
 import type { Route } from "./+types/social-start-page";
 import { makeSSRClient } from "~/supa-client";
 
-const currentUrl = import.meta.env.VITE_API_BASE_URL;
-
+const isDev = import.meta.env.DEV;
+const BASE_URL =
+  import.meta.env.VITE_BASE_URL ??
+  "https://https://sign-language-video-call-frontend.vercel.app";
+const DEV_BASE_URL = "http://localhost:5173";
 const paramsSchema = z.object({
   provider: z.enum(["github", "kakao"]),
 });
 
 export const loader = async ({ params, request }: Route.LoaderArgs) => {
-  console.log("currentUrl", currentUrl);
   const { success, data } = paramsSchema.safeParse(params);
   if (!success) {
     return redirect("/auth/login");
   }
 
   const { provider } = data;
-  const redirectTo = `${currentUrl}/auth/social/${provider}/complete`;
+  const redirectTo = `${BASE_URL}/auth/social/${provider}/complete`;
 
   const { client, headers } = makeSSRClient(request);
   const {
