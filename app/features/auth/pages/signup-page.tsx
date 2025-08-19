@@ -26,7 +26,6 @@ export const action = async ({ request }: Route.ActionArgs) => {
   const formData = await request.formData();
   const parsed = formSchema.safeParse(Object.fromEntries(formData));
   if (parsed.success === false) {
-    console.log("false");
     const formErrors: Record<string, string> = {};
 
     const passwordError = parsed.error.errors.find(
@@ -54,7 +53,6 @@ export const action = async ({ request }: Route.ActionArgs) => {
   }
   const { email, password } = parsed.data;
   const { client, headers } = makeSSRClient(request);
-  console.log("email,password", email, password);
   const { error } = await client.auth.signUp({
     email,
     password,

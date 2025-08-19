@@ -50,7 +50,6 @@ export const action = async ({ request }: Route.ActionArgs) => {
     case "search":
       if (searchQuery) {
         const users = await searchUsers(token, searchQuery);
-        console.log("users", users);
         return { results: users }; // <-- 이렇게 wrapping
       }
     case "call":
@@ -110,7 +109,7 @@ export default function FriendsPage({ loaderData }: Route.ComponentProps) {
 
   const [activeTab, setActiveTab] = useState<
     "received" | "sent" | "friends" | "search"
-  >("received");
+  >("friends");
 
   return (
     <div className="px-15 mx-auto">

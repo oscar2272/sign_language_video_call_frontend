@@ -29,7 +29,6 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   }
   const user = await getUserProfile(token);
   const hasNotifications = true;
-  console.log(user);
   return { user, hasNotifications, token };
 };
 
