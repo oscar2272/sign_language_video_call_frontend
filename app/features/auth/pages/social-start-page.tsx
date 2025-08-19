@@ -6,7 +6,7 @@ import { makeSSRClient } from "~/supa-client";
 const isDev = import.meta.env.DEV;
 const BASE_URL =
   import.meta.env.VITE_BASE_URL ??
-  "https://https://sign-language-video-call-frontend.vercel.app";
+  "https://sign-language-video-call-frontend.vercel.app";
 const DEV_BASE_URL = "http://localhost:5173";
 const paramsSchema = z.object({
   provider: z.enum(["github", "kakao"]),
