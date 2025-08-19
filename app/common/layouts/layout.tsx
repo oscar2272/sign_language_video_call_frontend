@@ -103,11 +103,11 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
 
-                  <DropdownMenuItem asChild>
+                  {/* <DropdownMenuItem asChild>
                     <Link to="/settings" className="cursor-pointer">
                       회원 설정
                     </Link>
-                  </DropdownMenuItem>
+                  </DropdownMenuItem> */}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link
