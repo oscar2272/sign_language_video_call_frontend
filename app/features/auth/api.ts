@@ -12,7 +12,7 @@ export async function EmailSignup(token: string): Promise<{ error?: string }> {
       "Content-Type": "application/json",
     },
   });
-
+  //test
   if (!res.ok) {
     const errorData = await res.json();
     return { error: errorData.message || "회원가입 실패" };
