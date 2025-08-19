@@ -13,6 +13,7 @@ const paramsSchema = z.object({
 });
 
 export const loader = async ({ params, request }: Route.LoaderArgs) => {
+  console.log("BASE_URL", BASE_URL);
   const { success, data } = paramsSchema.safeParse(params);
   if (!success) {
     return redirect("/auth/login");
