@@ -101,7 +101,6 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
                       </p>
                     </div>
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
 
                   {/* <DropdownMenuItem asChild>
                     <Link to="/settings" className="cursor-pointer">
