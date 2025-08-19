@@ -101,13 +101,14 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
                       </p>
                     </div>
                   </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
 
                   {/* <DropdownMenuItem asChild>
                     <Link to="/settings" className="cursor-pointer">
                       회원 설정
                     </Link>
-                  </DropdownMenuItem> */}
-                  <DropdownMenuSeparator />
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator /> */}
                   <DropdownMenuItem asChild>
                     <Link
                       to="/auth/logout"
