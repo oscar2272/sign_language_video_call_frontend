@@ -8,26 +8,27 @@ export const loader = async ({ params }: Route.LoaderArgs) => {
 };
 
 type IncomingCall = {
-  from: string;
-  roomId: string;
+  from_user: string;
+  room_id: string;
 };
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [userId] = useState(() => Math.floor(Math.random() * 10000).toString()); // 예시 user_id
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
 
   const WS_BASE_URL =
     import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-  // 1. 로컬 스트림 가져오기
+  // 1️⃣ 로컬 미디어 스트림 가져오기
   useEffect(() => {
     if (!roomId) return;
-
     async function initLocalStream() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -40,42 +41,37 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         console.error("카메라/마이크 접근 실패:", err);
       }
     }
-
     initLocalStream();
   }, [roomId]);
 
-  // 2. WebSocket 연결
+  // 2️⃣ WebSocket 연결
   useEffect(() => {
     if (!roomId) return;
-    const ws = new WebSocket(`${WS_BASE_URL}/ws/call/${roomId}/`);
+    const ws = new WebSocket(
+      `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${userId}`
+    );
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      console.log("WebSocket 연결 성공");
-    };
+    ws.onopen = () => console.log("WebSocket 연결 성공");
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
 
       switch (msg.type) {
         case "call_request":
-          // 상대방이 전화 걸었음을 알림
-          setIncomingCall({ from: msg.from, roomId: msg.roomId });
+          setIncomingCall({ from_user: msg.from_user, room_id: msg.room_id });
           break;
 
         case "offer":
-          if (!pcRef.current || !localStream) return;
-
+          if (!localStream) return;
           const pc = createPeerConnection();
           pcRef.current = pc;
           localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
-
           await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-
-          ws.send(JSON.stringify({ type: "answer", sdp: answer }));
-          setIncomingCall(null); // 통화 수락 완료
+          wsRef.current?.send(JSON.stringify({ type: "answer", sdp: answer }));
+          setIncomingCall(null);
           break;
 
         case "answer":
@@ -103,15 +99,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream]);
 
-  // 3. PeerConnection 생성 함수
+  // 3️⃣ PeerConnection 생성
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
+
     pc.ontrack = (event) => {
       if (remoteVideoRef.current)
         remoteVideoRef.current.srcObject = event.streams[0];
     };
+
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current) {
         wsRef.current.send(
@@ -119,14 +117,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         );
       }
     };
+
     return pc;
   };
 
-  // 4. 내가 전화를 걸 때 호출
+  // 4️⃣ 통화 걸기 (caller)
   const callUser = async () => {
     if (!localStream || !wsRef.current) return;
 
-    setIncomingCall(null); // 자기 화면에서 버튼 누른 후 상태 제거
+    // 1:1 call_request 전송
+    wsRef.current.send(
+      JSON.stringify({ type: "call_request", room_id: roomId })
+    );
 
     const pc = createPeerConnection();
     pcRef.current = pc;
@@ -134,7 +136,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
     wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer }));
   };
 
@@ -184,6 +185,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       </div>
 
       <div className="mt-6 flex gap-4">
+        <Button onClick={callUser}>통화 걸기</Button>
         <Button variant="destructive" onClick={endCall}>
           통화 종료
         </Button>
@@ -212,7 +214,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       {/* Incoming call modal */}
       {incomingCall && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
-          <h2 className="text-xl mb-4">전화가 왔습니다: {incomingCall.from}</h2>
+          <h2 className="text-xl mb-4">
+            전화가 왔습니다: {incomingCall.from_user}
+          </h2>
           <div className="flex gap-4">
             <Button onClick={callUser}>수락</Button>
             <Button variant="destructive" onClick={() => setIncomingCall(null)}>
