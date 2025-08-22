@@ -14,7 +14,7 @@ type IncomingCall = {
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
-  const [userId] = useState(() => Math.floor(Math.random() * 10000).toString()); // 예시 user_id
+  const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
@@ -26,7 +26,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const WS_BASE_URL =
     import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-  // 1️⃣ 로컬 미디어 스트림 가져오기
+  // 1️⃣ 로컬 스트림 가져오기
   useEffect(() => {
     if (!roomId) return;
     async function initLocalStream() {
@@ -52,18 +52,20 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     );
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("WebSocket 연결 성공");
+    ws.onopen = () => console.log("✅ WebSocket 연결 성공");
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
 
       switch (msg.type) {
         case "call_request":
+          console.log("📩 수신된 call_request:", msg);
           setIncomingCall({ from_user: msg.from_user, room_id: msg.room_id });
           break;
 
         case "offer":
           if (!localStream) return;
+          console.log("📩 offer 수신");
           const pc = createPeerConnection();
           pcRef.current = pc;
           localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
@@ -76,6 +78,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
         case "answer":
           if (!pcRef.current) return;
+          console.log("📩 answer 수신");
           await pcRef.current.setRemoteDescription(
             new RTCSessionDescription(msg.sdp)
           );
@@ -94,7 +97,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
-    ws.onclose = () => console.log("WebSocket 연결 종료");
+    ws.onclose = () => console.log("❌ WebSocket 연결 종료");
 
     return () => ws.close();
   }, [roomId, localStream]);
@@ -121,14 +124,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return pc;
   };
 
-  // 4️⃣ 통화 걸기 (caller)
+  // 4️⃣ 통화 걸기 (caller) -> call_request만 보냄
   const callUser = async () => {
-    if (!localStream || !wsRef.current) return;
-
-    // 1:1 call_request 전송
+    if (!wsRef.current) return;
+    console.log("📤 call_request 전송");
     wsRef.current.send(
       JSON.stringify({ type: "call_request", room_id: roomId })
     );
+  };
+
+  // 5️⃣ 수락 (callee가 수락 눌렀을 때 offer 생성)
+  const acceptCall = async () => {
+    if (!localStream || !wsRef.current) return;
 
     const pc = createPeerConnection();
     pcRef.current = pc;
@@ -137,8 +144,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer }));
+
+    setIncomingCall(null);
   };
 
+  // 6️⃣ 통화 종료
   const endCall = () => {
     pcRef.current?.close();
     wsRef.current?.close();
@@ -218,7 +228,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             전화가 왔습니다: {incomingCall.from_user}
           </h2>
           <div className="flex gap-4">
-            <Button onClick={callUser}>수락</Button>
+            <Button onClick={acceptCall}>수락</Button>
             <Button variant="destructive" onClick={() => setIncomingCall(null)}>
               거절
             </Button>
