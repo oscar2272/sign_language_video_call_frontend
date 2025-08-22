@@ -56,7 +56,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
-
+      console.log("🌐 WS 메시지 수신:", msg);
       switch (msg.type) {
         case "call_request":
           console.log("📩 수신된 call_request:", msg);

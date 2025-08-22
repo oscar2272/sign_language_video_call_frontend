@@ -1,4 +1,8 @@
 const BASE_URL = process.env.VITE_API_BASE_URL;
+const WS_BASE_URL = process.env.VITE_WS_BASE_URL;
+if (!WS_BASE_URL) {
+  throw new Error("❌ VITE_WS_BASE_URL is not defined");
+}
 if (!BASE_URL) {
   throw new Error("❌ VITE_API_BASE_URL is not defined");
 }
