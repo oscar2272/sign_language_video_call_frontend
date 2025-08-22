@@ -19,9 +19,9 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import type { IncomingCall } from "~/features/calls/type";
 import IncomingCallModal from "../components/IncomingCallModal";
+import { getLoggedInUserId } from "~/features/auth/quries";
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
-  //const userId = await getLoggedInUserId(client);
 
   const token = await client.auth
     .getSession()
@@ -29,9 +29,11 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   if (!token) {
     return redirect("/auth/signin");
   }
+  const userId = await getLoggedInUserId(client);
+
   const user = await getUserProfile(token);
   const hasNotifications = true;
-  return { user, hasNotifications, token };
+  return { user, hasNotifications, token, userId };
 };
 
 export default function Layout({ loaderData }: Route.ComponentProps) {
@@ -39,8 +41,8 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const user = loaderData?.user;
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
+  const userId = loaderData?.userId;
 
-  const userId = loaderData?.user.id; // supabase user ID
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   // --- Supabase Realtime 구독 ---
   useEffect(() => {
