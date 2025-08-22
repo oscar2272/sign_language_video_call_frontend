@@ -1,4 +1,4 @@
-import { browserClient, makeSSRClient } from "~/supa-client";
+import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/layout";
 import { Link, Outlet, redirect } from "react-router";
 import { Button } from "../components/ui/button";
@@ -19,20 +19,27 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import type { IncomingCall } from "~/features/calls/type";
 import IncomingCallModal from "../components/IncomingCallModal";
-import { getLoggedInUserId } from "~/features/auth/quries";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
 
+  // 서버에서 세션과 유저 ID 확인
   const token = await client.auth
     .getSession()
     .then((r) => r.data.session?.access_token);
   if (!token) {
     return redirect("/auth/signin");
   }
-  const userId = await getLoggedInUserId(client);
+  const userId = await client.auth.getUser();
+
+  if (!token || !userId) return redirect("/auth/signin");
 
   const user = await getUserProfile(token);
   const hasNotifications = true;
+  // console.log("🔵 유저 정보 로드 완료", user);
+  // console.log("userId:", userId);
   return { user, hasNotifications, token, userId };
 };
 
@@ -41,42 +48,56 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const user = loaderData?.user;
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
-  const userId = loaderData?.userId;
+  //const userId = loaderData?.userId;
 
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
-  // --- Supabase Realtime 구독 ---
+
+  const userId = loaderData?.userId;
+  const [browserClient, setBrowserClient] = useState<SupabaseClient | null>(
+    null
+  );
   useEffect(() => {
+    const client = createBrowserClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY
+    );
+    setBrowserClient(client);
+
     if (!userId) return;
-    console.log("🟢 Supabase Realtime 구독 시작", userId);
-    const subscription = browserClient
-      .channel(`user-${userId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "call_requests",
-          filter: `receiver_id=eq.${userId}`,
-        },
-        (payload) => {
-          console.log("📩 새로운 call_requests 감지", payload);
-          setIncomingCall({
-            room_id: payload.new.room_id,
-            from_user: payload.new.caller_id,
-          });
-        }
-      )
-      .subscribe();
+
+    const subscription = client.channel(`user-${userId}`);
+
+    // 1️⃣ 테이블 변화 구독 (기존)
+    subscription.on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "call_requests",
+        filter: `receiver_id=eq.${userId}`,
+      },
+      (payload) => {
+        console.log("📩 새로운 call_requests 감지", payload);
+      }
+    );
+
+    // 2️⃣ broadcast 이벤트 구독 (새로 추가)
+    subscription.on("broadcast", { event: "call_request" }, (payload) => {
+      const incoming: IncomingCall = {
+        from_user: payload.from_user,
+        room_id: payload.room_id,
+      };
+      setIncomingCall(incoming);
+    });
+
+    subscription.subscribe();
 
     return () => {
-      browserClient.removeChannel(subscription);
+      client.removeChannel(subscription);
     };
   }, [userId]);
-
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-
       <header className="w-full bg-white border-b shadow-sm">
         <div className="xl:px-32 lg:px-24 md:px-16 px-8">
           <div className="flex justify-between items-center h-16">
@@ -88,7 +109,6 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
               >
                 Orange
               </Link>
-
               <div className="hidden md:flex">
                 <Navigation />
               </div>
@@ -138,13 +158,6 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-
-                  {/* <DropdownMenuItem asChild>
-                    <Link to="/settings" className="cursor-pointer">
-                      회원 설정
-                    </Link>
-                  </DropdownMenuItem> */}
-                  {/* <DropdownMenuSeparator /> */}
                   <DropdownMenuItem asChild>
                     <Link
                       to="/auth/logout"
@@ -159,18 +172,18 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
           </div>
         </div>
 
-        {/* 모바일 네비게이션 */}
+        {/* 모바일 네비 */}
         <div className="md:hidden border-t bg-white">
           <div className="max-w-7xl mx-auto px-4 py-2">
             <Navigation />
           </div>
         </div>
       </header>
-      {/* Content */}
+
       <main className="flex-1 pt-20 xl:px-40 lg:px-32 md:px-16 px-8">
-        <Outlet context={{ user: loaderData!.user, token }} />
+        <Outlet context={{ user, token }} />
       </main>
-      {/* Incoming call modal */}
+
       {incomingCall && (
         <IncomingCallModal
           call={incomingCall}
