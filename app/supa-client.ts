@@ -6,16 +6,16 @@ import {
 } from "@supabase/ssr";
 
 export const browserClient = createBrowserClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
+  process.env.VITE_SUPABASE_URL!,
+  process.env.VITE_SUPABASE_ANON_KEY!
 );
 
 export const makeSSRClient = (request: Request) => {
   const headers = new Headers();
   const cookies = request.headers.get("Cookie") || "";
   const serverSideClient = createServerClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
+    process.env.VITE_SUPABASE_URL!,
+    process.env.VITE_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
