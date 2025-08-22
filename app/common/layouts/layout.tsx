@@ -1,4 +1,4 @@
-import { makeSSRClient } from "~/supa-client";
+import { browserClient, makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/layout";
 import { Link, Outlet, redirect } from "react-router";
 import { Button } from "../components/ui/button";
@@ -17,8 +17,8 @@ import {
 import { BellIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
-import IncomingCallModal from "../components/IncomingCallModal";
 import type { IncomingCall } from "~/features/calls/type";
+import IncomingCallModal from "../components/IncomingCallModal";
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   //const userId = await getLoggedInUserId(client);
@@ -39,24 +39,37 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const user = loaderData?.user;
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
-  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
-  const userId = loaderData?.user.id;
-  const WS_BASE_URL =
-    import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
+  const userId = loaderData?.user.id;
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  // --- Supabase Realtime 구독 ---
   useEffect(() => {
     if (!userId) return;
 
-    const ws = new WebSocket(`${WS_BASE_URL}/ws/call-notify`);
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "call_request") setIncomingCall(msg);
-    };
-    ws.onopen = () => console.log("✅ Global WS connected");
-    ws.onclose = () => console.log("❌ Global WS disconnected");
+    const subscription = browserClient
+      .channel(`user-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "call_requests",
+          filter: `receiver_id=eq.${userId}`,
+        },
+        (payload) => {
+          setIncomingCall({
+            room_id: payload.new.room_id,
+            from_user: payload.new.caller_id,
+          });
+        }
+      )
+      .subscribe();
 
-    return () => ws.close();
+    return () => {
+      browserClient.removeChannel(subscription);
+    };
   }, [userId]);
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
