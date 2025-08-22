@@ -40,12 +40,12 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
 
-  const userId = loaderData?.user.id;
+  const userId = loaderData?.user.id; // supabase user ID
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   // --- Supabase Realtime 구독 ---
   useEffect(() => {
     if (!userId) return;
-
+    console.log("🟢 Supabase Realtime 구독 시작", userId);
     const subscription = browserClient
       .channel(`user-${userId}`)
       .on(
@@ -57,6 +57,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
           filter: `receiver_id=eq.${userId}`,
         },
         (payload) => {
+          console.log("📩 새로운 call_requests 감지", payload);
           setIncomingCall({
             room_id: payload.new.room_id,
             from_user: payload.new.caller_id,
