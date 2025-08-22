@@ -56,46 +56,46 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const [browserClient, setBrowserClient] = useState<SupabaseClient | null>(
     null
   );
-  useEffect(() => {
-    const client = createBrowserClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
-    );
-    setBrowserClient(client);
+  // useEffect(() => {
+  //   const client = createBrowserClient(
+  //     import.meta.env.VITE_SUPABASE_URL,
+  //     import.meta.env.VITE_SUPABASE_ANON_KEY
+  //   );
+  //   setBrowserClient(client);
 
-    if (!userId) return;
+  //   if (!userId) return;
 
-    const subscription = client.channel(`user-${userId}`);
+  //   const subscription = client.channel(`user-${userId}`);
 
-    // 1️⃣ 테이블 변화 구독 (기존)
-    subscription.on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "call_requests",
-        filter: `receiver_id=eq.${userId}`,
-      },
-      (payload) => {
-        console.log("📩 새로운 call_requests 감지", payload);
-      }
-    );
+  //   // 1️⃣ 테이블 변화 구독 (기존)
+  //   subscription.on(
+  //     "postgres_changes",
+  //     {
+  //       event: "INSERT",
+  //       schema: "public",
+  //       table: "call_requests",
+  //       filter: `receiver_id=eq.${userId}`,
+  //     },
+  //     (payload) => {
+  //       console.log("📩 새로운 call_requests 감지", payload);
+  //     }
+  //   );
 
-    // 2️⃣ broadcast 이벤트 구독 (새로 추가)
-    subscription.on("broadcast", { event: "call_request" }, (payload) => {
-      const incoming: IncomingCall = {
-        from_user: payload.from_user,
-        room_id: payload.room_id,
-      };
-      setIncomingCall(incoming);
-    });
+  //   // 2️⃣ broadcast 이벤트 구독 (새로 추가)
+  //   subscription.on("broadcast", { event: "call_request" }, (payload) => {
+  //     const incoming: IncomingCall = {
+  //       from_user: payload.from_user,
+  //       room_id: payload.room_id,
+  //     };
+  //     setIncomingCall(incoming);
+  //   });
 
-    subscription.subscribe();
+  //   subscription.subscribe();
 
-    return () => {
-      client.removeChannel(subscription);
-    };
-  }, [userId]);
+  //   return () => {
+  //     client.removeChannel(subscription);
+  //   };
+  // }, [userId]);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <header className="w-full bg-white border-b shadow-sm">
