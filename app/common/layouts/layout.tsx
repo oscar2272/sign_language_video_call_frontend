@@ -47,9 +47,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (!userId) return;
 
-    const ws = new WebSocket(
-      `${WS_BASE_URL}/ws/call-notify/?user_id=${userId}`
-    );
+    const ws = new WebSocket(`${WS_BASE_URL}/ws/call-notify`);
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === "call_request") setIncomingCall(msg);
