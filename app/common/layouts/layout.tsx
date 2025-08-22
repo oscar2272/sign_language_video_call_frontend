@@ -16,7 +16,9 @@ import {
 } from "../components/ui/dropdown-menu";
 import { BellIcon } from "lucide-react";
 import { toast } from "sonner";
-
+import { useEffect, useState } from "react";
+import IncomingCallModal from "../components/IncomingCallModal";
+import type { IncomingCall } from "~/features/calls/type";
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   //const userId = await getLoggedInUserId(client);
@@ -37,6 +39,26 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const user = loaderData?.user;
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const userId = loaderData?.user.id;
+  const WS_BASE_URL =
+    import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const ws = new WebSocket(
+      `${WS_BASE_URL}/ws/call-notify/?user_id=${userId}`
+    );
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "call_request") setIncomingCall(msg);
+    };
+    ws.onopen = () => console.log("✅ Global WS connected");
+    ws.onclose = () => console.log("❌ Global WS disconnected");
+
+    return () => ws.close();
+  }, [userId]);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
@@ -130,11 +152,21 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
           </div>
         </div>
       </header>
-
       {/* Content */}
       <main className="flex-1 pt-20 xl:px-40 lg:px-32 md:px-16 px-8">
         <Outlet context={{ user: loaderData!.user, token }} />
       </main>
+      {/* Incoming call modal */}
+      {incomingCall && (
+        <IncomingCallModal
+          call={incomingCall}
+          onAccept={() => {
+            window.location.href = `/call/${incomingCall.room_id}`;
+            setIncomingCall(null);
+          }}
+          onReject={() => setIncomingCall(null)}
+        />
+      )}
     </div>
   );
 }

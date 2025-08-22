@@ -7,15 +7,9 @@ export const loader = async ({ params }: Route.LoaderArgs) => {
   return { roomId: params.id || null };
 };
 
-type IncomingCall = {
-  from_user: string;
-  room_id: string;
-};
-
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
-  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -44,7 +38,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, [roomId]);
 
-  // 2️⃣ WebSocket 연결
+  // 2️⃣ WebSocket 연결 (실제 방 연결)
   useEffect(() => {
     if (!roomId) return;
     const ws = new WebSocket(
@@ -52,189 +46,98 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     );
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("✅ WebSocket 연결 성공");
-
+    ws.onopen = () => console.log("✅ Room WS connected");
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
-      console.log("🌐 WS 메시지 수신:", msg);
-      switch (msg.type) {
-        case "call_request":
-          console.log("📩 수신된 call_request:", msg);
-          setIncomingCall({ from_user: msg.from_user, room_id: msg.room_id });
-          break;
-
-        case "offer":
-          if (!localStream) return;
-          console.log("📩 offer 수신");
-          const pc = createPeerConnection();
-          pcRef.current = pc;
-          localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          wsRef.current?.send(JSON.stringify({ type: "answer", sdp: answer }));
-          setIncomingCall(null);
-          break;
-
-        case "answer":
-          if (!pcRef.current) return;
-          console.log("📩 answer 수신");
-          await pcRef.current.setRemoteDescription(
-            new RTCSessionDescription(msg.sdp)
+      if (msg.type === "offer" && localStream) {
+        const pc = createPeerConnection();
+        pcRef.current = pc;
+        localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        wsRef.current?.send(JSON.stringify({ type: "answer", sdp: answer }));
+      } else if (msg.type === "answer" && pcRef.current) {
+        await pcRef.current.setRemoteDescription(
+          new RTCSessionDescription(msg.sdp)
+        );
+      } else if (msg.type === "ice" && pcRef.current) {
+        try {
+          await pcRef.current.addIceCandidate(
+            new RTCIceCandidate(msg.candidate)
           );
-          break;
-
-        case "ice":
-          if (!pcRef.current) return;
-          try {
-            await pcRef.current.addIceCandidate(
-              new RTCIceCandidate(msg.candidate)
-            );
-          } catch (e) {
-            console.error("ICE 추가 실패:", e);
-          }
-          break;
+        } catch (e) {
+          console.error("ICE 추가 실패:", e);
+        }
       }
     };
 
-    ws.onclose = () => console.log("❌ WebSocket 연결 종료");
-
+    ws.onclose = () => console.log("❌ Room WS disconnected");
     return () => ws.close();
   }, [roomId, localStream]);
 
-  // 3️⃣ PeerConnection 생성
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
-
     pc.ontrack = (event) => {
       if (remoteVideoRef.current)
         remoteVideoRef.current.srcObject = event.streams[0];
     };
-
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current) {
+      if (event.candidate && wsRef.current)
         wsRef.current.send(
           JSON.stringify({ type: "ice", candidate: event.candidate })
         );
-      }
     };
-
     return pc;
   };
 
-  // 4️⃣ 통화 걸기 (caller) -> call_request만 보냄
   const callUser = async () => {
     if (!wsRef.current) return;
-    console.log("📤 call_request 전송");
     wsRef.current.send(
       JSON.stringify({ type: "call_request", room_id: roomId })
     );
   };
-
-  // 5️⃣ 수락 (callee가 수락 눌렀을 때 offer 생성)
   const acceptCall = async () => {
     if (!localStream || !wsRef.current) return;
-
     const pc = createPeerConnection();
     pcRef.current = pc;
     localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
-
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer }));
-
-    setIncomingCall(null);
   };
-
-  // 6️⃣ 통화 종료
   const endCall = () => {
     pcRef.current?.close();
     wsRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
   };
 
-  if (!roomId) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white">
-        <h1 className="text-xl mb-4">전화 준비 중...</h1>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white">
       <h1 className="text-xl mb-4">Room: {roomId}</h1>
-
       <div className="grid grid-cols-2 gap-4 w-full max-w-5xl">
-        <div className="relative bg-gray-800 rounded-xl overflow-hidden">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-          <span className="absolute bottom-2 left-2 text-sm bg-black/50 px-2 py-1 rounded">
-            Me
-          </span>
-        </div>
-
-        <div className="relative bg-gray-800 rounded-xl overflow-hidden">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
-          <span className="absolute bottom-2 left-2 text-sm bg-black/50 px-2 py-1 rounded">
-            Remote
-          </span>
-        </div>
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover rounded-xl bg-gray-800"
+        />
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className="w-full h-full object-cover rounded-xl bg-gray-800"
+        />
       </div>
-
       <div className="mt-6 flex gap-4">
         <Button onClick={callUser}>통화 걸기</Button>
         <Button variant="destructive" onClick={endCall}>
           통화 종료
         </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            localStream
-              ?.getAudioTracks()
-              .forEach((t) => (t.enabled = !t.enabled));
-          }}
-        >
-          음소거
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            localStream
-              ?.getVideoTracks()
-              .forEach((t) => (t.enabled = !t.enabled));
-          }}
-        >
-          카메라 끄기
-        </Button>
       </div>
-
-      {/* Incoming call modal */}
-      {incomingCall && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
-          <h2 className="text-xl mb-4">
-            전화가 왔습니다: {incomingCall.from_user}
-          </h2>
-          <div className="flex gap-4">
-            <Button onClick={acceptCall}>수락</Button>
-            <Button variant="destructive" onClick={() => setIncomingCall(null)}>
-              거절
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

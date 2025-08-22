@@ -32,3 +32,8 @@ type CallHistoryLoaderData = {
     }>;
   };
 };
+
+export type IncomingCall = {
+  from_user: string;
+  room_id: string;
+};
