@@ -19,8 +19,6 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import type { IncomingCall } from "~/features/calls/type";
 import IncomingCallModal from "../components/IncomingCallModal";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { createBrowserClient } from "@supabase/ssr";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
@@ -32,15 +30,10 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   if (!token) {
     return redirect("/auth/signin");
   }
-  const userId = await client.auth.getUser();
-
-  if (!token || !userId) return redirect("/auth/signin");
 
   const user = await getUserProfile(token);
   const hasNotifications = true;
-  // console.log("🔵 유저 정보 로드 완료", user);
-  // console.log("userId:", userId);
-  return { user, hasNotifications, token, userId };
+  return { user, hasNotifications, token };
 };
 
 export default function Layout({ loaderData }: Route.ComponentProps) {
@@ -48,54 +41,31 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const user = loaderData?.user;
   const token = loaderData?.token;
   const hasNotification = loaderData?.hasNotifications;
-  //const userId = loaderData?.userId;
 
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
-
-  const userId = loaderData?.userId;
-  const [browserClient, setBrowserClient] = useState<SupabaseClient | null>(
-    null
-  );
   useEffect(() => {
-    const client = createBrowserClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
-    );
-    setBrowserClient(client);
+    if ("serviceWorker" in navigator) {
+      // 1️⃣ SW 등록
+      navigator.serviceWorker
+        .register("/service-worker.js")
+        .then((registration) => {
+          console.log("Service Worker 등록 완료", registration);
+        })
+        .catch((err) => console.error("SW 등록 실패", err));
 
-    if (!userId) return;
+      // 2️⃣ SW 메시지 수신
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        const data = event.data;
+        if (data?.type === "incoming_call") {
+          setIncomingCall({
+            room_id: data.room_id,
+            from_user: data.from_user,
+          });
+        }
+      });
+    }
+  }, []);
 
-    const subscription = client.channel(`user-${userId}`);
-
-    // 1️⃣ 테이블 변화 구독 (기존)
-    subscription.on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "call_requests",
-        filter: `receiver_id=eq.${userId}`,
-      },
-      (payload) => {
-        console.log("📩 새로운 call_requests 감지", payload);
-      }
-    );
-
-    // 2️⃣ broadcast 이벤트 구독 (새로 추가)
-    subscription.on("broadcast", { event: "call_request" }, (payload) => {
-      const incoming: IncomingCall = {
-        from_user: payload.from_user,
-        room_id: payload.room_id,
-      };
-      setIncomingCall(incoming);
-    });
-
-    subscription.subscribe();
-
-    return () => {
-      client.removeChannel(subscription);
-    };
-  }, [userId]);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <header className="w-full bg-white border-b shadow-sm">

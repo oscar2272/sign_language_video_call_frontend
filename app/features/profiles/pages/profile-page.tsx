@@ -9,7 +9,6 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
 import {
   loadTossPayments,
-  ANONYMOUS,
   type TossPaymentsWidgets,
 } from "@tosspayments/tosspayments-sdk";
 import { CreateOrder } from "../payment-api";
@@ -20,6 +19,7 @@ import { getCredit } from "../credit-api";
 import { toast } from "sonner";
 import { Input } from "~/common/components/ui/input";
 import { Label } from "~/common/components/ui/label";
+import { subscribePush } from "../subscription-api";
 
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
@@ -34,7 +34,6 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   return { userId, credit };
 };
 
-// 날짜 포맷팅 함수
 const formatDate = (dateString: string | null) => {
   if (!dateString) return null;
   const date = new Date(dateString);
@@ -54,7 +53,7 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
   }>();
 
   const [credits, setCredits] = useState({
-    remained_credit: 5,
+    remained_credit: loaderData.credit.remained_credit,
   });
 
   const [buyAmount, setBuyAmount] = useState(0);
@@ -142,6 +141,33 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
     }
   }
 
+  // URL-safe Base64 → Uint8Array 변환
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+    const rawData = atob(base64);
+    return new Uint8Array([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+  async function handleSubscribe(token: string) {
+    const sw = await navigator.serviceWorker.ready;
+
+    const publicKey =
+      "BF3DJ45XnJt1DDETmeeIoSZLVFqpWcdY2v0bDcrbs8IqhTBf_da2Dv_TkXz8DVoKvuvUtioPnbWD1nqpbvxaSbo";
+
+    const arr = urlBase64ToUint8Array(publicKey);
+    console.log("Key length:", arr.length);
+
+    const subscription = await sw.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+
+    await subscribePush(token, subscription);
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 px-15">
       <div className=" mx-auto">
@@ -179,6 +205,19 @@ export default function ProfilePage({ loaderData }: Route.ComponentProps) {
                 >
                   <Link to="/profiles/edit">프로필 수정</Link>
                 </Button>
+
+                {/* 🔔 푸시 알림 버튼 추가 */}
+                <div className="mt-6 flex flex-col items-center">
+                  <Button
+                    onClick={() => handleSubscribe(token)}
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded font-medium transition-colors"
+                  >
+                    브라우저 알림 켜기
+                  </Button>
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    AI 통화 알림 및 공지 수신
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-4 border-t pt-4">
