@@ -22,7 +22,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 1️⃣ 로컬 스트림 가져오기
   useEffect(() => {
-    if (!roomId) return;
     async function initLocalStream() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -36,23 +35,54 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     }
     initLocalStream();
-  }, [roomId]);
+  }, []);
 
-  // 2️⃣ WebSocket 연결 (실제 방 연결)
+  // 2️⃣ PeerConnection 생성 함수
+  const createPeerConnection = () => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+
+    // remote track
+    pc.ontrack = (event) => {
+      if (remoteVideoRef.current)
+        remoteVideoRef.current.srcObject = event.streams[0];
+    };
+
+    // ice candidate
+    pc.onicecandidate = (event) => {
+      if (event.candidate && wsRef.current) {
+        wsRef.current.send(
+          JSON.stringify({ type: "ice", candidate: event.candidate })
+        );
+      }
+    };
+
+    // local tracks 추가
+    if (localStream)
+      localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
+    return pc;
+  };
+
+  // 3️⃣ WebSocket 연결
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !localStream) return;
+
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${userId}`
     );
     wsRef.current = ws;
 
     ws.onopen = () => console.log("✅ Room WS connected");
+
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
-      if (msg.type === "offer" && localStream) {
+
+      if (msg.type === "offer") {
         const pc = createPeerConnection();
         pcRef.current = pc;
-        localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -76,38 +106,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream]);
 
-  const createPeerConnection = () => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    pc.ontrack = (event) => {
-      if (remoteVideoRef.current)
-        remoteVideoRef.current.srcObject = event.streams[0];
-    };
-    pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current)
-        wsRef.current.send(
-          JSON.stringify({ type: "ice", candidate: event.candidate })
-        );
-    };
-    return pc;
-  };
-
+  // 4️⃣ 통화 걸기 (caller)
   const callUser = async () => {
-    if (!wsRef.current) return;
-    wsRef.current.send(
-      JSON.stringify({ type: "call_request", room_id: roomId })
-    );
-  };
-  const acceptCall = async () => {
-    if (!localStream || !wsRef.current) return;
+    if (!wsRef.current || !localStream) return;
     const pc = createPeerConnection();
     pcRef.current = pc;
-    localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer }));
   };
+
+  // 5️⃣ 통화 종료
   const endCall = () => {
     pcRef.current?.close();
     wsRef.current?.close();
