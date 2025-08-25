@@ -18,10 +18,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isCameraOn, setIsCameraOn] = useState(true);
-  const [ended, setEnded] = useState(false);
-  const [callStatus, setCallStatus] = useState<
-    "idle" | "ringing" | "connected" | "rejected"
-  >("idle");
+  const [callStarted, setCallStarted] = useState(false); // 통화가 실제 시작됐는지
+  const [ended, setEnded] = useState(false); // 종료 처리 상태
+  const [incomingCall, setIncomingCall] = useState(false); // 수신 모달 표시 여부
+  const [callRejected, setCallRejected] = useState(false); // 상대방이 거절했는지
 
   const { user, token } = useOutletContext<{
     user: UserProfile;
@@ -74,7 +74,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return pc;
   };
 
-  // ✅ WebSocket + 초기 메시지 처리
+  // ✅ WebSocket + 메시지 처리
   useEffect(() => {
     if (!roomId || !localStream) return;
 
@@ -85,26 +85,35 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("✅ Room WS connected");
-      if (callStatus === "idle") {
-        // 전화 거는 쪽이면 call_request 전송
+      // caller라면 통화 요청 보내기
+      if (!incomingCall) {
         ws.send(JSON.stringify({ type: "call_request" }));
-        setCallStatus("ringing");
       }
     };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
 
+      // 🔴 수신 모달 표시 (callee)
       if (msg.type === "call_request") {
-        setCallStatus("ringing"); // 전화 수신 UI 표시
-      } else if (msg.type === "call_accepted") {
-        setCallStatus("connected");
+        setIncomingCall(true);
+      }
+      // 🔵 상대방 수락 → 통화 시작
+      else if (msg.type === "call_accepted") {
+        setCallStarted(true);
         startPeerConnection();
-      } else if (msg.type === "call_rejected") {
-        setCallStatus("rejected");
-      } else if (msg.type === "end_call") {
+      }
+      // 🔴 상대방 거절
+      else if (msg.type === "call_rejected") {
+        setCallRejected(true);
+        setIncomingCall(false);
+      }
+      // 🔴 통화 종료
+      else if (msg.type === "end_call") {
         handleEndCall();
-      } else if (msg.type === "offer") {
+      }
+      // 🔵 offer/answer/ice 처리
+      else if (msg.type === "offer") {
         pcRef.current = createPeerConnection();
         await pcRef.current.setRemoteDescription(
           new RTCSessionDescription(msg.sdp)
@@ -112,11 +121,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         const answer = await pcRef.current.createAnswer();
         await pcRef.current.setLocalDescription(answer);
         wsRef.current?.send(JSON.stringify({ type: "answer", sdp: answer }));
-        setCallStatus("connected");
+        setCallStarted(true);
       } else if (msg.type === "answer" && pcRef.current) {
         await pcRef.current.setRemoteDescription(
           new RTCSessionDescription(msg.sdp)
         );
+        setCallStarted(true);
       } else if (msg.type === "ice" && pcRef.current) {
         try {
           await pcRef.current.addIceCandidate(
@@ -130,9 +140,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onclose = () => console.log("❌ Room WS disconnected");
     return () => ws.close();
-  }, [roomId, localStream, callStatus]);
+  }, [roomId, localStream]);
 
-  // ✅ PeerConnection 시작 (offer 생성)
+  // ✅ PeerConnection 시작 (caller)
   const startPeerConnection = async () => {
     const pc = createPeerConnection();
     pcRef.current = pc;
@@ -144,13 +154,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // ✅ 수락 / 거절 핸들러
   const acceptCall = () => {
     wsRef.current?.send(JSON.stringify({ type: "call_accepted" }));
-    setCallStatus("connected");
+    setCallStarted(true);
+    setIncomingCall(false);
     startPeerConnection();
   };
 
   const rejectCall = () => {
     wsRef.current?.send(JSON.stringify({ type: "call_rejected" }));
-    setCallStatus("idle");
+    setIncomingCall(false);
   };
 
   // ✅ 통화 종료 처리
@@ -214,23 +225,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         />
       </div>
 
-      {callStatus === "ringing" && (
-        <div className="flex flex-col items-center gap-4 mt-6">
-          <p>전화가 걸려왔습니다</p>
-          <div className="flex gap-2">
-            <Button onClick={acceptCall}>수락</Button>
-            <Button variant="destructive" onClick={rejectCall}>
-              거절
-            </Button>
-          </div>
+      {/* caller 초기: 카메라 버튼만 */}
+      {!callStarted && !incomingCall && !callRejected && (
+        <div className="flex gap-4 mt-6">
+          <Button onClick={toggleCamera}>
+            카메라 {isCameraOn ? "끄기" : "켜기"}
+          </Button>
         </div>
       )}
 
-      {callStatus === "rejected" && (
-        <p className="mt-6">상대방이 통화를 거절했습니다</p>
-      )}
-
-      {callStatus === "connected" && (
+      {/* caller/통화 시작 후 종료 버튼 */}
+      {callStarted && (
         <div className="mt-6 flex gap-4">
           <Button onClick={toggleCamera} disabled={ended}>
             {isCameraOn ? "카메라 끄기" : "카메라 켜기"}
@@ -240,6 +245,24 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           </Button>
         </div>
       )}
+
+      {/* callee 수신 모달 */}
+      {incomingCall && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-white text-black p-6 rounded-lg flex flex-col items-center gap-4">
+            <p>전화가 걸려왔습니다</p>
+            <div className="flex gap-2">
+              <Button onClick={acceptCall}>수락</Button>
+              <Button variant="destructive" onClick={rejectCall}>
+                거절
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 상대방 거절 메시지 */}
+      {callRejected && <p className="mt-6">상대방이 통화를 거절했습니다</p>}
     </div>
   );
 }
