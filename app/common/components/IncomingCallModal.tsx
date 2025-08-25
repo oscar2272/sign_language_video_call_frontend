@@ -1,27 +1,29 @@
+import { useState, useEffect } from "react";
 import { Button } from "~/common/components/ui/button";
-import { useEffect, useState } from "react";
 import type { IncomingCall } from "~/features/calls/type";
+import { acceptCall, missCall, rejectCall } from "~/features/calls/api";
+import { useNavigate } from "react-router";
 
 interface Props {
   call: IncomingCall;
+  token: string;
+  duration?: number; // 자동 닫기 시간(ms)
   onAccept: () => void;
   onReject: () => void;
-  duration?: number; // 자동 닫기 시간 (ms)
 }
 
 export default function IncomingCallModal({
   call,
-  onAccept,
-  onReject,
-  duration = 30000, // 기본 30초
+  token,
+  duration = 30000,
 }: Props) {
   const [visible, setVisible] = useState(false);
   const [timeLeft, setTimeLeft] = useState(duration / 1000);
+  const navigate = useNavigate();
 
-  // 슬라이드 인
   useEffect(() => setVisible(true), []);
 
-  // 타이머
+  // 30초 타이머
   useEffect(() => {
     if (!visible) return;
     const interval = setInterval(() => {
@@ -29,14 +31,35 @@ export default function IncomingCallModal({
         if (prev <= 1) {
           clearInterval(interval);
           setVisible(false);
-          onReject();
+
+          // 시간초과 → 부재중 기록
+          missCall(token, call.room_id, call.from_user_id).catch(console.error);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [visible, onReject]);
+  }, [visible, token, call]);
+
+  const handleAccept = async () => {
+    try {
+      await acceptCall(token, call.room_id, call.from_user_id);
+      setVisible(false);
+      navigate(`/call/${call.room_id}`); // 수락 후 CallPage로 이동
+    } catch (err) {
+      console.error("수락 기록 실패:", err);
+    }
+  };
+
+  const handleReject = async () => {
+    try {
+      await rejectCall(token, call.room_id, call.from_user_id);
+      setVisible(false);
+    } catch (err) {
+      console.error("거절 기록 실패:", err);
+    }
+  };
 
   return (
     <div
@@ -51,21 +74,12 @@ export default function IncomingCallModal({
       <p className="text-xs text-gray-500 mb-3">시간 초: {timeLeft}초</p>
 
       <div className="flex gap-2 mt-auto">
-        <Button
-          onClick={() => {
-            setVisible(false);
-            onAccept();
-          }}
-          className="flex-1 py-1 text-sm"
-        >
+        <Button onClick={handleAccept} className="flex-1 py-1 text-sm">
           수락
         </Button>
         <Button
+          onClick={handleReject}
           variant="destructive"
-          onClick={() => {
-            setVisible(false);
-            onReject();
-          }}
           className="flex-1 py-1 text-sm"
         >
           거절

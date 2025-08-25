@@ -51,11 +51,7 @@ const getCallTypeText = (callType: any, callStatus: string) => {
 };
 const PAGE_SIZE = 10;
 
-export default function CallHistoryPage({
-  loaderData,
-}: {
-  loaderData: CallHistoryLoaderData;
-}) {
+export default function CallHistoryPage({ loaderData }: Route.ComponentProps) {
   const { user } = useOutletContext<{ user: UserProfile }>();
   const [page, setPage] = useState(1);
 
@@ -125,7 +121,7 @@ export default function CallHistoryPage({
       {formattedHistory.length > 0 ? (
         <>
           <div className="space-y-3">
-            {formattedHistory.map((call) => (
+            {formattedHistory.map((call: any) => (
               <div
                 key={call.id}
                 className="flex items-center bg-white justify-between border rounded-lg p-4 hover:bg-gray-50"

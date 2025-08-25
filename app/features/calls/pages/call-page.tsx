@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { Route } from "./+types/call-page";
+import { endCall as endCallApi } from "~/features/calls/api";
+import { useOutletContext } from "react-router";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   return { roomId: params.id || null };
@@ -10,8 +12,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const { user, token } = useOutletContext<{
+    user: UserProfile;
+    token: string;
+  }>();
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -21,7 +26,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const WS_BASE_URL =
     import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-  // 1️⃣ 로컬 스트림 가져오기
   useEffect(() => {
     async function initLocalStream() {
       try {
@@ -38,35 +42,28 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 함수
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    // remote track
     pc.ontrack = (event) => {
       if (remoteVideoRef.current)
         remoteVideoRef.current.srcObject = event.streams[0];
     };
 
-    // ice candidate
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current) {
+      if (event.candidate && wsRef.current)
         wsRef.current.send(
           JSON.stringify({ type: "ice", candidate: event.candidate })
         );
-      }
     };
 
-    // local tracks 추가
     if (localStream)
       localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
-
     return pc;
   };
 
-  // 3️⃣ WebSocket 연결
   useEffect(() => {
     if (!roomId || !localStream) return;
 
@@ -77,20 +74,25 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("✅ Room WS connected");
-      callUser(); // ✅ 자동 연결 시작
+      const pc = createPeerConnection();
+      pcRef.current = pc;
+
+      // offer 자동 생성
+      pc.createOffer().then((offer) => {
+        pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: "offer", sdp: offer }));
+      });
     };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
-
       if (msg.type === "offer") {
         const pc = createPeerConnection();
         pcRef.current = pc;
-
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        wsRef.current?.send(JSON.stringify({ type: "answer", sdp: answer }));
+        ws.send(JSON.stringify({ type: "answer", sdp: answer }));
       } else if (msg.type === "answer" && pcRef.current) {
         await pcRef.current.setRemoteDescription(
           new RTCSessionDescription(msg.sdp)
@@ -110,25 +112,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream]);
 
-  // 4️⃣ 통화 시작 (자동 호출됨)
-  const callUser = async () => {
-    if (!wsRef.current || !localStream) return;
-    const pc = createPeerConnection();
-    pcRef.current = pc;
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    wsRef.current.send(JSON.stringify({ type: "offer", sdp: offer }));
-  };
-
-  // 5️⃣ 통화 종료
-  const endCall = () => {
+  const endCall = async () => {
     pcRef.current?.close();
     wsRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
+    try {
+      await endCallApi(token, roomId!, "0"); // 크레딧 사용량 전달
+    } catch (err) {
+      console.error("종료 기록 실패:", err);
+    }
   };
 
-  // 6️⃣ 카메라 On/Off
   const toggleCamera = () => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
