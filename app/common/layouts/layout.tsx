@@ -56,7 +56,10 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
       // 2️⃣ SW 메시지 수신
       navigator.serviceWorker.addEventListener("message", (event) => {
         const data = event.data;
+        console.log("SW로부터 받은 메시지:", data);
         if (data?.type === "incoming_call") {
+          console.log("발신자 ID:", data.from_user_id); // <- from_user_id만 확인
+          console.log("발신자 이름:", data.from_user_name); // <- 닉네임 확인
           setIncomingCall({
             room_id: data.room_id,
             from_user_id: data.from_user_id, // ✅ 발신자 ID 저장
