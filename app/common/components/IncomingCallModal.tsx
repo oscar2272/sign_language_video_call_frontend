@@ -1,58 +1,106 @@
 import { useState, useEffect } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { IncomingCall } from "~/features/calls/type";
-import { acceptCall, missCall, rejectCall } from "~/features/calls/api";
 import { useNavigate } from "react-router";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const CALL_API_URL = `${BASE_URL}/api/calls`;
 
 interface Props {
   call: IncomingCall;
   token: string;
   duration?: number; // 자동 닫기 시간(ms)
+  onAccept?: () => void; // optional
+  onReject?: () => void; // optional
 }
 
 export default function IncomingCallModal({
   call,
   token,
   duration = 30000,
+  onAccept,
+  onReject,
 }: Props) {
   const [visible, setVisible] = useState(false);
   const [timeLeft, setTimeLeft] = useState(duration / 1000);
   const navigate = useNavigate();
 
+  // 1️⃣ 모달 열기
   useEffect(() => setVisible(true), []);
 
+  // 2️⃣ 타이머
   useEffect(() => {
     if (!visible) return;
+
     const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setVisible(false);
-
-          // 시간초과 → 부재중 기록
-          missCall(token, call.room_id, call.from_user_id).catch(console.error);
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeft((prev) => prev - 1);
     }, 1000);
-    return () => clearInterval(interval);
-  }, [visible, token, call]);
 
+    if (timeLeft <= 1) {
+      clearInterval(interval);
+      setVisible(false);
+
+      // 부재중 처리
+      (async () => {
+        try {
+          await fetch(`${CALL_API_URL}/missed/`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              room_id: call.room_id,
+              receiver_id: call.from_user_id,
+            }),
+          });
+        } catch (err) {
+          console.error(err);
+        }
+        onReject?.();
+      })();
+    }
+
+    return () => clearInterval(interval);
+  }, [visible, timeLeft, token, call, onReject]);
+
+  // 3️⃣ 수락
   const handleAccept = async () => {
     try {
-      await acceptCall(token, call.room_id, call.from_user_id);
+      await fetch(`${CALL_API_URL}/accept/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          room_id: call.room_id,
+          receiver_id: call.from_user_id,
+        }),
+      });
       setVisible(false);
-      navigate(`/call/${call.room_id}`);
+      if (onAccept) onAccept();
+      else navigate(`/call/${call.room_id}`);
     } catch (err) {
       console.error("수락 기록 실패:", err);
     }
   };
 
+  // 4️⃣ 거절
   const handleReject = async () => {
     try {
-      await rejectCall(token, call.room_id, call.from_user_id);
+      await fetch(`${CALL_API_URL}/reject/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          room_id: call.room_id,
+          caller_id: call.from_user_id,
+        }),
+      });
       setVisible(false);
+      onReject?.();
     } catch (err) {
       console.error("거절 기록 실패:", err);
     }
