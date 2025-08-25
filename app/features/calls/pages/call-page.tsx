@@ -79,19 +79,30 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     );
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       console.log("✅ Room WS connected");
       const pc = createPeerConnection();
       pcRef.current = pc;
 
-      pc.createOffer().then((offer) => {
-        pc.setLocalDescription(offer);
-        ws.send(JSON.stringify({ type: "offer", sdp: offer }));
-      });
+      // 내가 offer 보내는 쪽이라면
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: "offer", sdp: offer }));
     };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
+
+      // 🔴 상대방 종료 처리
+      if (msg.type === "end_call") {
+        pcRef.current?.close();
+        localStream?.getTracks().forEach((t) => t.stop());
+        wsRef.current?.close();
+        alert("상대방이 통화를 종료했습니다.");
+        return;
+      }
+
+      // 🔵 기존 offer/answer/ice 처리
       if (msg.type === "offer") {
         const pc = createPeerConnection();
         pcRef.current = pc;
@@ -120,10 +131,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // ✅ 통화 종료
   const endCall = async () => {
-    pcRef.current?.close();
-    wsRef.current?.close();
-    localStream?.getTracks().forEach((t) => t.stop());
+    // 1️⃣ WebSocket으로 종료 신호 전송
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "end_call" }));
+    }
 
+    // 2️⃣ PeerConnection/스트림 정리
+    pcRef.current?.close();
+    localStream?.getTracks().forEach((t) => t.stop());
+    wsRef.current?.close();
+
+    // 3️⃣ 서버에 종료 기록 (한쪽만 호출)
+    if (!roomId) return;
     try {
       const res = await fetch(`${CALL_API_URL}/end/`, {
         method: "POST",
