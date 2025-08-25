@@ -1,4 +1,3 @@
-// app/routes/call/$id?.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { Route } from "./+types/call-page";
@@ -11,6 +10,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
+  const [isCameraOn, setIsCameraOn] = useState(true);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -74,7 +75,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     );
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("✅ Room WS connected");
+    ws.onopen = () => {
+      console.log("✅ Room WS connected");
+      callUser(); // ✅ 자동 연결 시작
+    };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
@@ -106,7 +110,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream]);
 
-  // 4️⃣ 통화 걸기 (caller)
+  // 4️⃣ 통화 시작 (자동 호출됨)
   const callUser = async () => {
     if (!wsRef.current || !localStream) return;
     const pc = createPeerConnection();
@@ -122,6 +126,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     pcRef.current?.close();
     wsRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
+  };
+
+  // 6️⃣ 카메라 On/Off
+  const toggleCamera = () => {
+    if (!localStream) return;
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = !track.enabled;
+      setIsCameraOn(track.enabled);
+    });
   };
 
   return (
@@ -143,7 +156,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         />
       </div>
       <div className="mt-6 flex gap-4">
-        <Button onClick={callUser}>통화 걸기</Button>
+        <Button onClick={toggleCamera}>
+          {isCameraOn ? "카메라 끄기" : "카메라 켜기"}
+        </Button>
         <Button variant="destructive" onClick={endCall}>
           통화 종료
         </Button>
