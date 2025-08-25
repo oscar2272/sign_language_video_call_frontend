@@ -41,6 +41,7 @@ export default function IncomingCallModal({
 
       // 부재중 처리
       (async () => {
+        console.log(CALL_API_URL + "/missed/"); // ← 여기에 찍으면 실제 호출 URL 확인 가능
         try {
           await fetch(`${CALL_API_URL}/missed/`, {
             method: "POST",
