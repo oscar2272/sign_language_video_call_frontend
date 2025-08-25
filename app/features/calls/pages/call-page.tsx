@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
 import { useOutletContext } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
-import { endCall as endCallApi } from "~/features/calls/api";
 import type { Route } from "./+types/call-page";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   return { roomId: params.id || null };
 };
 
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const CALL_API_URL = `${BASE_URL}/api/calls`;
 const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
@@ -28,6 +29,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
+  // ✅ 로컬 스트림 가져오기
   useEffect(() => {
     async function initLocalStream() {
       try {
@@ -44,6 +46,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
+  // ✅ PeerConnection 생성
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -67,6 +70,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return pc;
   };
 
+  // ✅ WebSocket + WebRTC
   useEffect(() => {
     if (!roomId || !localStream) return;
 
@@ -114,17 +118,29 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream]);
 
+  // ✅ 통화 종료
   const endCall = async () => {
     pcRef.current?.close();
     wsRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
+
     try {
-      await endCallApi(token, roomId!, "0");
+      const res = await fetch(`${CALL_API_URL}/end/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ room_id: roomId, used_credits: "0" }),
+      });
+      if (!res.ok) throw new Error("통화 종료 기록 실패");
+      console.log("통화 종료 기록 성공");
     } catch (err) {
-      console.error("종료 기록 실패:", err);
+      console.error(err);
     }
   };
 
+  // ✅ 카메라 토글
   const toggleCamera = () => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
