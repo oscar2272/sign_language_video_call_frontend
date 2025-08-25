@@ -18,48 +18,45 @@ export default function IncomingCallModal({
   const [visible, setVisible] = useState(false);
   const [timeLeft, setTimeLeft] = useState(duration / 1000);
 
-  // 슬라이드 인 효과
-  useEffect(() => {
-    setVisible(true);
-  }, []);
+  // 슬라이드 인
+  useEffect(() => setVisible(true), []);
 
   // 타이머
   useEffect(() => {
     if (!visible) return;
-
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
           setVisible(false);
-          onReject(); // 시간초과 시 자동 거절
+          onReject();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(interval);
   }, [visible, onReject]);
 
   return (
     <div
-      className={`fixed top-0 left-0 h-full w-80 bg-white shadow-lg border-r z-50 flex flex-col p-6
+      className={`fixed top-20 left-4 w-64 bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200 z-50 flex flex-col p-4
         transform transition-transform duration-300 ${
           visible ? "translate-x-0" : "-translate-x-full"
         }`}
     >
-      <h2 className="text-lg font-semibold mb-2">
+      <h2 className="text-md font-semibold mb-1 truncate">
         📞 {call.from_user_name} 님의 전화
       </h2>
-      <p className="text-sm text-gray-500 mb-4">시간 초: {timeLeft}초</p>
-      <div className="flex gap-3 mt-auto">
+      <p className="text-xs text-gray-500 mb-3">시간 초: {timeLeft}초</p>
+
+      <div className="flex gap-2 mt-auto">
         <Button
           onClick={() => {
             setVisible(false);
             onAccept();
           }}
-          className="flex-1"
+          className="flex-1 py-1 text-sm"
         >
           수락
         </Button>
@@ -69,7 +66,7 @@ export default function IncomingCallModal({
             setVisible(false);
             onReject();
           }}
-          className="flex-1"
+          className="flex-1 py-1 text-sm"
         >
           거절
         </Button>
