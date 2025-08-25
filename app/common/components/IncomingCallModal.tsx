@@ -75,7 +75,7 @@ export default function IncomingCallModal({
         },
         body: JSON.stringify({
           room_id: call.room_id,
-          receiver_id: call.from_user_id,
+          caller_id: call.from_user_id,
         }),
       });
       setVisible(false);

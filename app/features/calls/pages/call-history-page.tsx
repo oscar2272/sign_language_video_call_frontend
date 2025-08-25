@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { Phone, PhoneCall, Clock, Info, InfoIcon } from "lucide-react";
+import { Phone, PhoneCall, Clock, InfoIcon } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -11,6 +10,7 @@ import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/call-history-page";
 import { Link, useOutletContext } from "react-router";
 import { Pagination } from "~/features/friends/pages/friends-page";
+import { useState } from "react";
 export const loader = async ({ request }: Route.LoaderArgs) => {
   const { client } = makeSSRClient(request);
   const token = await client.auth

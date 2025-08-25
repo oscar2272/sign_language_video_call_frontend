@@ -1,4 +1,3 @@
-import React from "react";
 import { makeSSRClient } from "~/supa-client";
 import type { Route } from "./+types/call-history-detail-page";
 import { getCallHistoryDetailList } from "../api";
