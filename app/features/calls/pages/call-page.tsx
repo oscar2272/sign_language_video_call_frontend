@@ -246,21 +246,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         </div>
       )}
 
-      {/* callee 수신 모달 */}
-      {incomingCall && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-white text-black p-6 rounded-lg flex flex-col items-center gap-4">
-            <p>전화가 걸려왔습니다</p>
-            <div className="flex gap-2">
-              <Button onClick={acceptCall}>수락</Button>
-              <Button variant="destructive" onClick={rejectCall}>
-                거절
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 상대방 거절 메시지 */}
       {callRejected && <p className="mt-6">상대방이 통화를 거절했습니다</p>}
     </div>
