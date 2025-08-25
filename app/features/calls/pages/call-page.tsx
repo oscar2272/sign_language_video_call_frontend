@@ -9,6 +9,9 @@ export const loader = async ({ params }: Route.LoaderArgs) => {
   return { roomId: params.id || null };
 };
 
+const WS_BASE_URL =
+  import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
+
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
@@ -24,9 +27,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-
-  const WS_BASE_URL =
-    import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
   useEffect(() => {
     async function initLocalStream() {
