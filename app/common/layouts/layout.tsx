@@ -157,6 +157,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
 
       {incomingCall && (
         <IncomingCallModal
+          token={token}
           call={incomingCall}
           onAccept={() => {
             window.location.href = `/call/${incomingCall.room_id}`;

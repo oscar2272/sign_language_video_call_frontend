@@ -51,3 +51,87 @@ export async function callFriends(token: string, requestId: number) {
 
   return res.json();
 }
+
+// 친구의 call 요청 수락
+export async function acceptCall(
+  token: string,
+  roomId: string,
+  receiverId: string
+) {
+  const res = await fetch(`${CALL_API_URL}/accept/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ room_id: roomId, receiver_id: receiverId }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
+
+// 친구의 call 요청 거절
+export async function rejectCall(
+  token: string,
+  roomId: string,
+  callerId: string
+) {
+  const res = await fetch(`${CALL_API_URL}/reject/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ room_id: roomId, caller_id: callerId }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
+
+// 부재중전화
+export async function missCall(
+  token: string,
+  roomId: string,
+  receiverId: string
+) {
+  const res = await fetch(`${CALL_API_URL}/missed/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ room_id: roomId, receiver_id: receiverId }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
+
+// call 종료
+export async function endCall(
+  token: string,
+  roomId: string,
+  useCredits: string
+) {
+  const res = await fetch(`${CALL_API_URL}/end/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ room_id: roomId, used_credits: useCredits }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to accept friend request");
+  }
+
+  return res.json();
+}
