@@ -59,7 +59,8 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
         if (data?.type === "incoming_call") {
           setIncomingCall({
             room_id: data.room_id,
-            from_user: data.from_user,
+            from_user_id: data.from_user_id,
+            from_user_name: data.from_user_name, // ✅ 닉네임 저장
           });
         }
       });

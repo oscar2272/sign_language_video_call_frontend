@@ -1,8 +1,5 @@
 import { Button } from "~/common/components/ui/button";
-type IncomingCall = {
-  from_user: string;
-  room_id: string;
-};
+import type { IncomingCall } from "~/features/calls/type";
 
 interface Props {
   call: IncomingCall;
@@ -12,11 +9,15 @@ interface Props {
 
 export default function IncomingCallModal({ call, onAccept, onReject }: Props) {
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center bg-black/70 text-white z-50">
-      <h2 className="text-xl mb-4">전화가 왔습니다: {call.from_user}</h2>
-      <div className="flex gap-4">
-        <Button onClick={onAccept}>수락</Button>
-        <Button variant="destructive" onClick={onReject}>
+    <div className="fixed top-0 left-0 h-full w-80 bg-white shadow-lg border-r z-50 flex flex-col p-6">
+      <h2 className="text-lg font-semibold mb-4">
+        📞 {call.from_user_name} 님의 전화
+      </h2>
+      <div className="flex gap-3 mt-auto">
+        <Button onClick={onAccept} className="flex-1">
+          수락
+        </Button>
+        <Button variant="destructive" onClick={onReject} className="flex-1">
           거절
         </Button>
       </div>

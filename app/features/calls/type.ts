@@ -34,6 +34,7 @@ type CallHistoryLoaderData = {
 };
 
 export type IncomingCall = {
-  from_user: string;
+  from_user_id: string;
+  from_user_name: string; // ✅ 닉네임
   room_id: string;
 };
