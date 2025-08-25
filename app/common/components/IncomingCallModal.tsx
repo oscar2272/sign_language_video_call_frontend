@@ -8,8 +8,6 @@ interface Props {
   call: IncomingCall;
   token: string;
   duration?: number; // 자동 닫기 시간(ms)
-  onAccept: () => void;
-  onReject: () => void;
 }
 
 export default function IncomingCallModal({
@@ -23,7 +21,6 @@ export default function IncomingCallModal({
 
   useEffect(() => setVisible(true), []);
 
-  // 30초 타이머
   useEffect(() => {
     if (!visible) return;
     const interval = setInterval(() => {
@@ -46,7 +43,7 @@ export default function IncomingCallModal({
     try {
       await acceptCall(token, call.room_id, call.from_user_id);
       setVisible(false);
-      navigate(`/call/${call.room_id}`); // 수락 후 CallPage로 이동
+      navigate(`/call/${call.room_id}`);
     } catch (err) {
       console.error("수락 기록 실패:", err);
     }

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
-import type { Route } from "./+types/call-page";
-import { endCall as endCallApi } from "~/features/calls/api";
 import { useOutletContext } from "react-router";
+import type { UserProfile } from "~/features/profiles/type";
+import { endCall as endCallApi } from "~/features/calls/api";
+import type { Route } from "./+types/call-page";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   return { roomId: params.id || null };
@@ -13,6 +14,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [userId] = useState(() => Math.floor(Math.random() * 10000).toString());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isCameraOn, setIsCameraOn] = useState(true);
+
   const { user, token } = useOutletContext<{
     user: UserProfile;
     token: string;
@@ -53,10 +55,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     };
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current)
+      if (event.candidate && wsRef.current) {
         wsRef.current.send(
           JSON.stringify({ type: "ice", candidate: event.candidate })
         );
+      }
     };
 
     if (localStream)
@@ -77,7 +80,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       const pc = createPeerConnection();
       pcRef.current = pc;
 
-      // offer 자동 생성
       pc.createOffer().then((offer) => {
         pc.setLocalDescription(offer);
         ws.send(JSON.stringify({ type: "offer", sdp: offer }));
@@ -117,7 +119,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     wsRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
     try {
-      await endCallApi(token, roomId!, "0"); // 크레딧 사용량 전달
+      await endCallApi(token, roomId!, "0");
     } catch (err) {
       console.error("종료 기록 실패:", err);
     }
