@@ -50,8 +50,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 + 트랙 추가
-  const createPeerConnection = (): RTCPeerConnection => {
+  // 2️⃣ PeerConnection 생성 + 트랙 추가 (stream 필요)
+  const createPeerConnection = (stream: MediaStream) => {
     if (pcRef.current) return pcRef.current;
 
     const pc = new RTCPeerConnection({
@@ -71,11 +71,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
-    if (localStream) {
-      localStream
-        .getTracks()
-        .forEach((track) => pc.addTrack(track, localStream));
-    }
+    // ✅ stream이 존재할 때만 track 추가
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     pcRef.current = pc;
     return pc;
@@ -85,7 +82,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (!roomId || !localStream) return;
 
-    const pc = createPeerConnection();
+    const pc = createPeerConnection(localStream);
 
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${userId}`
@@ -108,7 +105,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           break;
 
         case "accepted":
-          // 발신자: offer 생성
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           ws.send(JSON.stringify({ type: "offer", sdp: offer }));
@@ -133,6 +129,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           } catch (e) {
             console.error("ICE 추가 실패:", e);
           }
+          break;
+
+        case "rejected":
+          setCallStatus("rejected");
           break;
 
         case "end_call":
