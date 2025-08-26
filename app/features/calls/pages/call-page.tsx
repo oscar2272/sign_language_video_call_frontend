@@ -32,7 +32,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoRef>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const connectionTimeRef = useRef<NodeJS.Timeout | null>(null);
