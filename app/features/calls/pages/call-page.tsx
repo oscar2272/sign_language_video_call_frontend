@@ -28,19 +28,29 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   >("calling");
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
-  const [isIncoming, setIsIncoming] = useState(false);
-  const [callerName, setCallerName] = useState("");
   const [connectionTime, setConnectionTime] = useState(0);
-  const [isInitiator, setIsInitiator] = useState(true); // 발신자인지 수신자인지 구분
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const connectionTimeRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+
+  // 디버그 로그 함수
+  const addDebugLog = (message: string) => {
+    console.log(`[CallPage] ${message}`);
+    setDebugInfo((prev) => [
+      ...prev.slice(-4),
+      `${new Date().toLocaleTimeString()}: ${message}`,
+    ]);
+  };
 
   // WebRTC 설정
   const createPeerConnection = () => {
+    addDebugLog("Creating peer connection...");
+
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -49,31 +59,43 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     });
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current) {
+      if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+        addDebugLog("Sending ICE candidate");
         wsRef.current.send(
           JSON.stringify({
             type: "ice",
             candidate: event.candidate,
           })
         );
+      } else if (!event.candidate) {
+        addDebugLog("ICE gathering complete");
       }
     };
 
     pc.ontrack = (event) => {
+      addDebugLog("Remote track received");
       setRemoteStream(event.streams[0]);
     };
 
     pc.onconnectionstatechange = () => {
-      console.log("Connection state:", pc.connectionState);
-      if (pc.connectionState === "connected") {
+      const state = pc.connectionState;
+      addDebugLog(`Connection state changed: ${state}`);
+
+      if (state === "connected") {
         setCallStatus("connected");
         startConnectionTimer();
-      } else if (
-        pc.connectionState === "failed" ||
-        pc.connectionState === "disconnected"
-      ) {
+      } else if (state === "failed" || state === "closed") {
+        addDebugLog("Connection failed or closed, ending call");
         endCall();
       }
+    };
+
+    pc.onicegatheringstatechange = () => {
+      addDebugLog(`ICE gathering state: ${pc.iceGatheringState}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      addDebugLog(`Signaling state: ${pc.signalingState}`);
     };
 
     return pc;
@@ -82,11 +104,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // 미디어 스트림 초기화
   const initializeMedia = async () => {
     try {
+      addDebugLog("Requesting media access...");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: { width: 1280, height: 720 },
         audio: true,
       });
+
       setLocalStream(stream);
+      addDebugLog("Media access granted");
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -94,7 +119,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       return stream;
     } catch (error) {
-      console.error("Error accessing media devices:", error);
+      addDebugLog(`Media access error: ${error}`);
       alert("카메라와 마이크 접근 권한이 필요합니다.");
       return null;
     }
@@ -102,40 +127,36 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // WebSocket 연결
   const connectWebSocket = () => {
+    addDebugLog("Connecting to WebSocket...");
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`
     );
 
     ws.onopen = () => {
-      console.log("WebSocket connected");
-      // 같은 룸에 들어온 사용자들끼리 바로 연결 시작
-      console.log("Starting connection process for room:", roomId);
+      addDebugLog("WebSocket connected");
     };
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
-      console.log("WebSocket message received:", data);
+      addDebugLog(`WebSocket message: ${data.type}`);
 
       switch (data.type) {
         case "user_joined":
-          // 새 사용자가 룸에 들어왔을 때
-          console.log("User joined room, starting offer process");
+          addDebugLog("User joined, creating offer");
           setCallStatus("connecting");
-          setTimeout(() => createOffer(), 500);
+          // 짧은 지연 후 offer 생성
+          setTimeout(() => createOffer(), 1000);
           break;
 
         case "offer":
-          console.log("Received offer:", data.offer);
           await handleOffer(data.offer);
           break;
 
         case "answer":
-          console.log("Received answer:", data.answer);
           await handleAnswer(data.answer);
           break;
 
         case "ice":
-          console.log("Received ICE candidate:", data.candidate);
           await handleIceCandidate(data.candidate);
           break;
 
@@ -148,95 +169,111 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     };
 
     ws.onclose = () => {
-      console.log("WebSocket disconnected");
+      addDebugLog("WebSocket disconnected");
     };
 
     ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
+      addDebugLog(`WebSocket error: ${error}`);
     };
 
     return ws;
   };
 
-  // Offer 생성 (발신자)
+  // Offer 생성
   const createOffer = async () => {
-    console.log("Creating offer...");
-    if (!pcRef.current || !localStream) {
-      console.log("PeerConnection or localStream not ready");
+    addDebugLog("Creating offer...");
+
+    if (!localStream) {
+      addDebugLog("Local stream not ready, waiting...");
       return;
     }
 
-    // 로컬 스트림 트랙들을 PeerConnection에 추가
+    // PeerConnection 생성 및 트랙 추가
+    const pc = createPeerConnection();
+    pcRef.current = pc;
+
+    // 로컬 스트림 트랙들을 먼저 추가
     localStream.getTracks().forEach((track) => {
-      console.log("Adding track to peer connection:", track.kind);
-      pcRef.current!.addTrack(track, localStream);
+      addDebugLog(`Adding ${track.kind} track to peer connection`);
+      pc.addTrack(track, localStream);
     });
 
     try {
-      const offer = await pcRef.current.createOffer({
+      const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
       });
-      await pcRef.current.setLocalDescription(offer);
-      console.log("Offer created and set as local description");
 
-      if (wsRef.current) {
+      await pc.setLocalDescription(offer);
+      addDebugLog("Offer created and set as local description");
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: "offer",
             offer: offer,
           })
         );
-        console.log("Offer sent via WebSocket");
+        addDebugLog("Offer sent via WebSocket");
       }
     } catch (error) {
-      console.error("Error creating offer:", error);
+      addDebugLog(`Error creating offer: ${error}`);
     }
   };
 
-  // Offer 처리 (수신자)
+  // Offer 처리
   const handleOffer = async (offer: RTCSessionDescriptionInit) => {
-    console.log("Handling offer...");
-    if (!pcRef.current || !localStream) {
-      console.log("PeerConnection or localStream not ready for handling offer");
+    addDebugLog("Handling offer...");
+
+    if (!localStream) {
+      addDebugLog("Local stream not ready for handling offer");
       return;
     }
 
-    // 로컬 스트림 트랙들을 PeerConnection에 추가
+    // PeerConnection 생성 및 트랙 추가
+    const pc = createPeerConnection();
+    pcRef.current = pc;
+
     localStream.getTracks().forEach((track) => {
-      console.log("Adding track to peer connection:", track.kind);
-      pcRef.current!.addTrack(track, localStream);
+      addDebugLog(`Adding ${track.kind} track to peer connection`);
+      pc.addTrack(track, localStream);
     });
 
     try {
-      await pcRef.current.setRemoteDescription(
-        new RTCSessionDescription(offer)
-      );
-      console.log("Remote description set");
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      addDebugLog("Remote description (offer) set");
 
-      const answer = await pcRef.current.createAnswer();
-      await pcRef.current.setLocalDescription(answer);
-      console.log("Answer created and set as local description");
+      // 대기 중인 ICE candidates 처리
+      for (const candidate of pendingCandidatesRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        addDebugLog("Added pending ICE candidate");
+      }
+      pendingCandidatesRef.current = [];
 
-      if (wsRef.current) {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      addDebugLog("Answer created and set as local description");
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: "answer",
             answer: answer,
           })
         );
-        console.log("Answer sent via WebSocket");
+        addDebugLog("Answer sent via WebSocket");
       }
     } catch (error) {
-      console.error("Error handling offer:", error);
+      addDebugLog(`Error handling offer: ${error}`);
     }
   };
 
   // Answer 처리
   const handleAnswer = async (answer: RTCSessionDescriptionInit) => {
-    console.log("Handling answer...");
+    addDebugLog("Handling answer...");
+
     if (!pcRef.current) {
-      console.log("PeerConnection not ready for handling answer");
+      addDebugLog("PeerConnection not ready for handling answer");
       return;
     }
 
@@ -244,24 +281,37 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       await pcRef.current.setRemoteDescription(
         new RTCSessionDescription(answer)
       );
-      console.log("Remote description (answer) set successfully");
+      addDebugLog("Remote description (answer) set successfully");
+
+      // 대기 중인 ICE candidates 처리
+      for (const candidate of pendingCandidatesRef.current) {
+        await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addDebugLog("Added pending ICE candidate");
+      }
+      pendingCandidatesRef.current = [];
     } catch (error) {
-      console.error("Error handling answer:", error);
+      addDebugLog(`Error handling answer: ${error}`);
     }
   };
 
   // ICE Candidate 처리
   const handleIceCandidate = async (candidate: RTCIceCandidateInit) => {
     if (!pcRef.current) {
-      console.log("PeerConnection not ready for ICE candidate");
+      addDebugLog("PeerConnection not ready, storing ICE candidate");
+      pendingCandidatesRef.current.push(candidate);
       return;
     }
 
-    try {
-      await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-      console.log("ICE candidate added successfully");
-    } catch (error) {
-      console.error("Error adding ICE candidate:", error);
+    if (pcRef.current.remoteDescription) {
+      try {
+        await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        addDebugLog("ICE candidate added successfully");
+      } catch (error) {
+        addDebugLog(`Error adding ICE candidate: ${error}`);
+      }
+    } else {
+      addDebugLog("Remote description not set, storing ICE candidate");
+      pendingCandidatesRef.current.push(candidate);
     }
   };
 
@@ -272,43 +322,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }, 1000);
   };
 
-  // 통화 수락 (WebSocket으로 accepted 신호 전송)
-  const sendAcceptSignal = () => {
-    console.log("Sending accepted signal...");
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: "accepted" }));
-    }
-  };
-
-  // 통화 거절
-  const rejectCall = async () => {
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: "rejected" }));
-    }
-
-    try {
-      await fetch(`${CALL_API_URL}/reject/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          room_id: roomId,
-          caller_id: user.id,
-        }),
-      });
-    } catch (err) {
-      console.error("거절 기록 실패:", err);
-    }
-
-    setCallStatus("rejected");
-    setTimeout(() => navigate("/friends"), 2000);
-  };
-
   // 통화 종료
   const endCall = async () => {
-    if (wsRef.current) {
+    addDebugLog("Ending call...");
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "end_call" }));
     }
 
@@ -325,7 +343,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         body: JSON.stringify({ room_id: roomId }),
       });
     } catch (err) {
-      console.error("Failed to end call:", err);
+      addDebugLog(`Failed to end call: ${err}`);
     }
 
     setTimeout(() => navigate("/friends"), 2000);
@@ -338,6 +356,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setIsCameraOn(videoTrack.enabled);
+        addDebugLog(`Camera ${videoTrack.enabled ? "enabled" : "disabled"}`);
       }
     }
   };
@@ -349,12 +368,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsMicOn(audioTrack.enabled);
+        addDebugLog(`Mic ${audioTrack.enabled ? "enabled" : "disabled"}`);
       }
     }
   };
 
   // 정리 함수
   const cleanup = () => {
+    addDebugLog("Cleaning up resources...");
+
     if (connectionTimeRef.current) {
       clearInterval(connectionTimeRef.current);
     }
@@ -386,20 +408,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       return;
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const isReceiver = urlParams.get("receiver") === "true";
-    setIsInitiator(!isReceiver);
-
-    console.log("Initializing CallPage:", {
-      isReceiver,
-      isInitiator: !isReceiver,
-    });
+    addDebugLog("Initializing CallPage");
 
     const init = async () => {
       const stream = await initializeMedia();
       if (!stream) return;
 
-      pcRef.current = createPeerConnection();
+      // WebSocket 연결
       wsRef.current = connectWebSocket();
     };
 
@@ -412,10 +427,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
+      addDebugLog("Remote stream set to video element");
     }
   }, [remoteStream]);
-
-  // 수신 전화 UI는 IncomingCallModal에서 처리하므로 제거
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col">
@@ -428,6 +442,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         )}
         {callStatus === "rejected" && <span>통화가 거절되었습니다</span>}
         {callStatus === "ended" && <span>통화가 종료되었습니다</span>}
+      </div>
+
+      {/* 디버그 정보 (개발 중에만 표시) */}
+      <div className="bg-red-900 text-white p-2 text-xs max-h-20 overflow-y-auto">
+        {debugInfo.map((info, index) => (
+          <div key={index}>{info}</div>
+        ))}
       </div>
 
       {/* 비디오 영역 */}
