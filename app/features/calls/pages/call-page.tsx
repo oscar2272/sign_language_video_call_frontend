@@ -134,6 +134,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       addDebugLog("WebSocket connected");
+      // 연결 후 룸에 있는 다른 사용자들에게 자신의 존재를 알림
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "join_room" }));
+          addDebugLog("Sent join_room message");
+        }
+      }, 500);
     };
 
     ws.onmessage = async (event) => {
@@ -142,21 +149,29 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       switch (data.type) {
         case "user_joined":
-          addDebugLog("User joined, creating offer");
+          addDebugLog("User joined, creating offer in 1 second");
           setCallStatus("connecting");
-          // 짧은 지연 후 offer 생성
+          setTimeout(() => createOffer(), 1000);
+          break;
+
+        case "join_room":
+          addDebugLog("Someone joined the room, creating offer");
+          setCallStatus("connecting");
           setTimeout(() => createOffer(), 1000);
           break;
 
         case "offer":
+          addDebugLog("Received offer, handling...");
           await handleOffer(data.offer);
           break;
 
         case "answer":
+          addDebugLog("Received answer, handling...");
           await handleAnswer(data.answer);
           break;
 
         case "ice":
+          addDebugLog("Received ICE candidate");
           await handleIceCandidate(data.candidate);
           break;
 
@@ -165,6 +180,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           cleanup();
           setTimeout(() => navigate("/friends"), 2000);
           break;
+
+        default:
+          addDebugLog(`Unknown message type: ${data.type}`);
       }
     };
 
@@ -476,8 +494,20 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         {!remoteStream &&
           callStatus !== "ended" &&
           callStatus !== "rejected" && (
-            <div className="absolute inset-0 flex items-center justify-center text-white text-xl">
-              상대방을 기다리는 중...
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xl">
+              <div className="mb-4">상대방을 기다리는 중...</div>
+              {callStatus === "calling" && (
+                <Button
+                  onClick={() => {
+                    addDebugLog("Manual connection attempt");
+                    setCallStatus("connecting");
+                    setTimeout(() => createOffer(), 500);
+                  }}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  연결 시도
+                </Button>
+              )}
             </div>
           )}
       </div>
