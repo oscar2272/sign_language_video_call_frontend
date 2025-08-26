@@ -19,15 +19,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [ended, setEnded] = useState(false);
+  const [callStatus, setCallStatus] = useState<
+    "calling" | "accepted" | "rejected" | "ended"
+  >("calling");
 
   const { user, token } = useOutletContext<{
     user: UserProfile;
     token: string;
   }>();
-
-  const [callStatus, setCallStatus] = useState<
-    "calling" | "accepted" | "rejected" | "ended"
-  >("calling");
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -51,15 +50,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 (localStream 준비 후)
+  // 2️⃣ PeerConnection 생성 함수
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current)
+      if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
+      }
     };
 
     pc.onicecandidate = (event) => {
@@ -70,13 +70,32 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
-    if (localStream)
+    // localStream이 준비되면 트랙 추가
+    if (localStream) {
       localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+    }
 
     return pc;
   };
 
-  // 3️⃣ WebSocket + 메시지 처리
+  // 3️⃣ localStream이 준비되면 항상 PeerConnection에 추가 + video element 연결
+  useEffect(() => {
+    if (!localStream) return;
+
+    const pc = pcRef.current;
+    if (pc) {
+      const existingTracks = pc.getSenders().map((s) => s.track);
+      localStream.getTracks().forEach((track) => {
+        if (!existingTracks.includes(track)) pc.addTrack(track, localStream);
+      });
+    }
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  // 4️⃣ WebSocket 연결 + 메시지 처리
   useEffect(() => {
     if (!roomId || !localStream) return;
 
@@ -87,8 +106,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("✅ WS connected");
-
-      // 수신자든 발신자든 페이지 들어오면 바로 call_request 보내기
+      // 페이지 들어오면 call_request 전송
       ws.send(JSON.stringify({ type: "call_request" }));
     };
 
@@ -101,7 +119,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       switch (msg.type) {
         case "call_request":
-          // 페이지 들어온 사람은 바로 accepted 신호 보내서 offer 받을 준비
           ws.send(JSON.stringify({ type: "accepted" }));
           setCallStatus("accepted");
           break;
@@ -152,7 +169,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream, ended]);
 
-  // 4️⃣ 통화 종료
+  // 5️⃣ 통화 종료
   const endCall = async () => {
     if (ended) return;
     setEnded(true);
@@ -181,7 +198,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // 5️⃣ 카메라 토글
+  // 6️⃣ 카메라 토글
   const toggleCamera = () => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
