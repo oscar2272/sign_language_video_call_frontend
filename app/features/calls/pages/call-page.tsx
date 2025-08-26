@@ -110,12 +110,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       console.log("WebSocket connected");
       // 발신자의 경우에만 call_request 전송
       if (isInitiator) {
+        console.log("Sending call_request as initiator");
         ws.send(
           JSON.stringify({
             type: "call_request",
             from_user_name: user.profile?.nickname || "Unknown",
           })
         );
+      } else {
+        console.log("Connected as receiver, waiting for signals");
       }
     };
 
@@ -125,17 +128,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       switch (data.type) {
         case "call_request":
-          // 수신자만 수신 전화로 처리
+          console.log("Received call_request");
+          // 수신자는 자동으로 연결 준비 (IncomingCallModal에서 수락 처리됨)
           if (!isInitiator) {
-            setIsIncoming(true);
-            setCallerName(data.from_user_name || "Unknown");
+            setCallStatus("connecting");
           }
           break;
 
         case "accepted":
           console.log("Call accepted, creating offer...");
           setCallStatus("connecting");
-          setIsIncoming(false);
           // PeerConnection과 로컬 스트림이 준비된 후 offer 생성
           setTimeout(() => createOffer(), 100);
           break;
@@ -294,18 +296,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }, 1000);
   };
 
-  // 통화 수락
-  const acceptCall = async () => {
-    console.log("Accepting call...");
+  // 통화 수락 (WebSocket으로 accepted 신호 전송)
+  const sendAcceptSignal = () => {
+    console.log("Sending accepted signal...");
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "accepted" }));
     }
-
-    // ✅ API 호출 제거 - 중복 생성 방지
-    // accept API는 IncomingCallModal에서 이미 호출되었음
-
-    setIsIncoming(false);
-    setCallStatus("connecting");
   };
 
   // 통화 거절
@@ -415,11 +411,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
 
     // URL에서 현재 사용자가 발신자인지 수신자인지 판단
-    // 친구 페이지에서 "통화하기" 버튼을 누른 사용자는 발신자
-    // IncomingCallModal에서 "수락" 버튼을 누른 사용자는 수신자
     const urlParams = new URLSearchParams(window.location.search);
     const isReceiver = urlParams.get("receiver") === "true";
     setIsInitiator(!isReceiver);
+
+    console.log("Initializing CallPage:", {
+      isReceiver,
+      isInitiator: !isReceiver,
+    });
 
     const init = async () => {
       const stream = await initializeMedia();
@@ -427,6 +426,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       pcRef.current = createPeerConnection();
       wsRef.current = connectWebSocket();
+
+      // 수신자의 경우 자동으로 accepted 신호 전송
+      if (isReceiver) {
+        setTimeout(() => {
+          console.log("Auto-sending accepted signal for receiver");
+          if (wsRef.current) {
+            wsRef.current.send(JSON.stringify({ type: "accepted" }));
+          }
+        }, 1000); // WebSocket 연결 후 1초 대기
+      }
     };
 
     init();
@@ -441,38 +450,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   }, [remoteStream]);
 
-  // 수신 전화 UI
-  if (isIncoming) {
-    return (
-      <div className="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
-        <div className="bg-white rounded-2xl p-8 text-center shadow-2xl max-w-sm w-full mx-4">
-          <div className="mb-6">
-            <div className="w-24 h-24 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center text-4xl">
-              👤
-            </div>
-            <h2 className="text-2xl font-bold mb-2">{callerName}</h2>
-            <p className="text-gray-600">전화가 왔습니다</p>
-          </div>
-
-          <div className="flex gap-4 justify-center">
-            <Button
-              onClick={rejectCall}
-              variant="destructive"
-              className="w-16 h-16 rounded-full text-2xl"
-            >
-              📞
-            </Button>
-            <Button
-              onClick={acceptCall}
-              className="w-16 h-16 rounded-full text-2xl bg-green-500 hover:bg-green-600"
-            >
-              📞
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // 수신 전화 UI는 IncomingCallModal에서 처리하므로 제거
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col">
