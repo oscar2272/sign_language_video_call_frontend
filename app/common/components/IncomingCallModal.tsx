@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { IncomingCall } from "~/features/calls/type";
 import { useNavigate } from "react-router";
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const CALL_API_URL = `${BASE_URL}/api/calls`;
+const WS_BASE_URL =
+  import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
 interface Props {
   call: IncomingCall;
@@ -23,47 +25,51 @@ export default function IncomingCallModal({
   const [visible, setVisible] = useState(false);
   const [timeLeft, setTimeLeft] = useState(duration / 1000);
   const navigate = useNavigate();
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // 1️⃣ 모달 열기
-  useEffect(() => setVisible(true), []);
+  // 1️⃣ 모달 열기 + WS 연결
+  useEffect(() => {
+    setVisible(true);
+
+    const ws = new WebSocket(
+      `${WS_BASE_URL}/ws/call/${call.room_id}/?user_id=${call.from_user_id}`
+    );
+    wsRef.current = ws;
+
+    ws.onopen = () => console.log("✅ IncomingCall WS connected");
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "rejected") {
+        // 상대방이 전화를 거절했을 때
+        alert("상대방이 전화를 거절했습니다.");
+        setVisible(false);
+        onReject?.();
+      }
+      if (msg.type === "accepted") {
+        // 상대방이 전화를 수락했을 때 (내가 걸었을 경우)
+        navigate(`/call/${call.room_id}`);
+      }
+    };
+
+    ws.onclose = () => console.log("❌ IncomingCall WS disconnected");
+
+    return () => ws.close();
+  }, [call.room_id, call.from_user_id, navigate, onReject]);
 
   // 2️⃣ 타이머
   useEffect(() => {
     if (!visible) return;
 
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
+    const interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
 
     if (timeLeft <= 1) {
       clearInterval(interval);
-      setVisible(false);
-
-      // 부재중 처리
-      (async () => {
-        console.log("romm_id", call.room_id);
-        console.log("from_user_id", call.from_user_id);
-        try {
-          await fetch(`${CALL_API_URL}/missed/`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              room_id: call.room_id,
-              receiver_id: call.from_user_id,
-            }),
-          });
-        } catch (err) {
-          console.error(err);
-        }
-        onReject?.();
-      })();
+      handleReject(); // 자동 거절
     }
 
     return () => clearInterval(interval);
-  }, [visible, timeLeft, token, call, onReject]);
+  }, [visible, timeLeft]);
 
   // 3️⃣ 수락
   const handleAccept = async () => {
@@ -79,6 +85,9 @@ export default function IncomingCallModal({
           caller_id: call.from_user_id,
         }),
       });
+
+      wsRef.current?.send(JSON.stringify({ type: "accepted" }));
+
       setVisible(false);
       if (onAccept) onAccept();
       else navigate(`/call/${call.room_id}`);
@@ -101,6 +110,9 @@ export default function IncomingCallModal({
           caller_id: call.from_user_id,
         }),
       });
+
+      wsRef.current?.send(JSON.stringify({ type: "rejected" }));
+
       setVisible(false);
       onReject?.();
     } catch (err) {
