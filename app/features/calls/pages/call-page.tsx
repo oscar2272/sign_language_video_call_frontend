@@ -50,16 +50,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 함수
-  const createPeerConnection = () => {
+  // 2️⃣ PeerConnection 생성 함수 (항상 localStream 트랙 추가)
+  const getOrCreatePeerConnection = (): RTCPeerConnection => {
+    if (pcRef.current) return pcRef.current;
+
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current) {
+      if (remoteVideoRef.current)
         remoteVideoRef.current.srcObject = event.streams[0];
-      }
     };
 
     pc.onicecandidate = (event) => {
@@ -72,30 +73,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     // localStream이 준비되면 트랙 추가
     if (localStream) {
-      localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+      localStream
+        .getTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
     }
 
+    pcRef.current = pc;
     return pc;
   };
 
-  // 3️⃣ localStream이 준비되면 항상 PeerConnection에 추가 + video element 연결
-  useEffect(() => {
-    if (!localStream) return;
-
-    const pc = pcRef.current;
-    if (pc) {
-      const existingTracks = pc.getSenders().map((s) => s.track);
-      localStream.getTracks().forEach((track) => {
-        if (!existingTracks.includes(track)) pc.addTrack(track, localStream);
-      });
-    }
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
-  // 4️⃣ WebSocket 연결 + 메시지 처리
+  // 3️⃣ WebSocket 연결 + 메시지 처리
   useEffect(() => {
     if (!roomId || !localStream) return;
 
@@ -106,7 +93,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("✅ WS connected");
-      // 페이지 들어오면 call_request 전송
       ws.send(JSON.stringify({ type: "call_request" }));
     };
 
@@ -114,8 +100,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       const msg = JSON.parse(event.data);
       console.log("WS 메시지:", msg);
 
-      const pc = pcRef.current || createPeerConnection();
-      pcRef.current = pc;
+      const pc = getOrCreatePeerConnection();
 
       switch (msg.type) {
         case "call_request":
@@ -124,7 +109,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           break;
 
         case "accepted":
-          // 내가 발신자라면 offer 생성
+          // 발신자: offer 생성
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           ws.send(JSON.stringify({ type: "offer", sdp: offer }));
@@ -169,7 +154,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return () => ws.close();
   }, [roomId, localStream, ended]);
 
-  // 5️⃣ 통화 종료
+  // 4️⃣ 통화 종료
   const endCall = async () => {
     if (ended) return;
     setEnded(true);
@@ -198,7 +183,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // 6️⃣ 카메라 토글
+  // 5️⃣ 카메라 토글
   const toggleCamera = () => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
