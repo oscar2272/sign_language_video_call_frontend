@@ -189,9 +189,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     addDebugLog("Creating offer...");
 
     if (!localStream) {
-      addDebugLog("Local stream not ready, waiting...");
+      addDebugLog("Local stream not ready! Retrying in 1 second...");
+      setTimeout(() => createOffer(), 1000);
       return;
     }
+
+    addDebugLog(
+      `Local stream ready with ${localStream.getTracks().length} tracks`
+    );
 
     // PeerConnection 생성 및 트랙 추가
     const pc = createPeerConnection();
@@ -220,6 +225,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           })
         );
         addDebugLog("Offer sent via WebSocket");
+      } else {
+        addDebugLog("WebSocket not ready, cannot send offer");
       }
     } catch (error) {
       addDebugLog(`Error creating offer: ${error}`);
@@ -416,10 +423,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     addDebugLog("Initializing CallPage");
 
     const init = async () => {
+      // 1. 먼저 미디어 스트림을 가져옴
       const stream = await initializeMedia();
       if (!stream) return;
 
-      // WebSocket 연결
+      addDebugLog("Media stream ready, connecting WebSocket");
+
+      // 2. 미디어 스트림이 준비된 후에 WebSocket 연결
       wsRef.current = connectWebSocket();
     };
 
