@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
-import { useOutletContext, useNavigate } from "react-router";
+import { useOutletContext, useNavigate, redirect } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
-  return { roomId: params.id || null };
+  const roomId = params.id.toString();
+  if (!roomId) {
+    return redirect("/");
+  }
+  return { roomId };
 };
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -15,7 +19,7 @@ const WS_BASE_URL =
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   // loaderData가 null일 수 있으므로 안전하게 처리
-  const roomId = loaderData?.roomId || null;
+  const roomId = loaderData?.roomId;
   const navigate = useNavigate();
   const { user, token } = useOutletContext<{
     user: UserProfile;
