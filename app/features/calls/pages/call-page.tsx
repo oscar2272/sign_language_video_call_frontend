@@ -50,19 +50,25 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 + 트랙 추가 (stream 필요)
-  const createPeerConnection = (stream: MediaStream) => {
-    if (pcRef.current) return pcRef.current;
+  // 2️⃣ PeerConnection 생성 + 트랙 추가
+  useEffect(() => {
+    if (!localStream || !roomId) return;
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
+    pcRef.current = pc;
 
+    // local track 추가
+    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+    // remote track
     pc.ontrack = (event) => {
       if (remoteVideoRef.current)
         remoteVideoRef.current.srcObject = event.streams[0];
     };
 
+    // ICE candidate
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current) {
         wsRef.current.send(
@@ -71,19 +77,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
-    // ✅ stream이 존재할 때만 track 추가
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-    pcRef.current = pc;
-    return pc;
-  };
-
-  // 3️⃣ WebSocket 연결 + 메시지 처리
-  useEffect(() => {
-    if (!roomId || !localStream) return;
-
-    const pc = createPeerConnection(localStream);
-
+    // WS 연결
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${userId}`
     );
@@ -155,7 +149,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       localStream.getTracks().forEach((t) => t.stop());
       ws.close();
     };
-  }, [roomId, localStream, ended]);
+  }, [localStream, roomId, ended]);
 
   // 4️⃣ 통화 종료
   const endCall = async () => {
@@ -164,7 +158,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     setCallStatus("ended");
 
     wsRef.current?.send(JSON.stringify({ type: "end_call" }));
-
     pcRef.current?.close();
     localStream?.getTracks().forEach((t) => t.stop());
     wsRef.current?.close();
