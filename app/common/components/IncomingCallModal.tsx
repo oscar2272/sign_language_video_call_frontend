@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { IncomingCall } from "~/features/calls/type";
 import { useNavigate } from "react-router";
-
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const CALL_API_URL = `${BASE_URL}/api/calls`;
 
@@ -42,33 +41,23 @@ export default function IncomingCallModal({
 
       // 부재중 처리
       (async () => {
-        console.log("=== Sending missed call request ===");
-        console.log("room_id:", call.room_id);
-        console.log("from_user_id:", call.from_user_id);
-        console.log("token:", token);
-
-        const payload = {
-          room_id: call.room_id,
-          receiver_id: call.from_user_id,
-        };
-        console.log("Payload:", payload);
-
+        console.log("romm_id", call.room_id);
+        console.log("from_user_id", call.from_user_id);
         try {
-          const res = await fetch(`${CALL_API_URL}/missed/`, {
+          await fetch(`${CALL_API_URL}/missed/`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              room_id: call.room_id,
+              receiver_id: call.from_user_id,
+            }),
           });
-          console.log("Response status:", res.status);
-          const data = await res.json().catch(() => null);
-          console.log("Response body:", data);
         } catch (err) {
-          console.error("Fetch error:", err);
+          console.error(err);
         }
-
         onReject?.();
       })();
     }
@@ -78,66 +67,44 @@ export default function IncomingCallModal({
 
   // 3️⃣ 수락
   const handleAccept = async () => {
-    console.log("=== Accepting call ===");
-    console.log("room_id:", call.room_id);
-    console.log("caller_id:", call.from_user_id);
-    console.log("token:", token);
-
-    const payload = {
-      room_id: call.room_id,
-      caller_id: call.from_user_id,
-    };
-
     try {
-      const res = await fetch(`${CALL_API_URL}/accept/`, {
+      await fetch(`${CALL_API_URL}/accept/`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          room_id: call.room_id,
+          caller_id: call.from_user_id,
+        }),
       });
-      console.log("Accept response status:", res.status);
-      const data = await res.json().catch(() => null);
-      console.log("Accept response body:", data);
-
       setVisible(false);
       if (onAccept) onAccept();
       else navigate(`/call/${call.room_id}`);
     } catch (err) {
-      console.error("Accept fetch error:", err);
+      console.error("수락 기록 실패:", err);
     }
   };
 
   // 4️⃣ 거절
   const handleReject = async () => {
-    console.log("=== Rejecting call ===");
-    console.log("room_id:", call.room_id);
-    console.log("caller_id:", call.from_user_id);
-    console.log("token:", token);
-
-    const payload = {
-      room_id: call.room_id,
-      caller_id: call.from_user_id,
-    };
-
     try {
-      const res = await fetch(`${CALL_API_URL}/reject/`, {
+      await fetch(`${CALL_API_URL}/reject/`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          room_id: call.room_id,
+          caller_id: call.from_user_id,
+        }),
       });
-      console.log("Reject response status:", res.status);
-      const data = await res.json().catch(() => null);
-      console.log("Reject response body:", data);
-
       setVisible(false);
       onReject?.();
     } catch (err) {
-      console.error("Reject fetch error:", err);
+      console.error("거절 기록 실패:", err);
     }
   };
 
