@@ -5,8 +5,6 @@ import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
-  console.log("CallPage params:", params);
-  console.log("CallPage params.id:", params.id);
   return { roomId: params.id || null };
 };
 
@@ -16,7 +14,8 @@ const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
-  const { roomId } = loaderData;
+  // loaderData가 null일 수 있으므로 안전하게 처리
+  const roomId = loaderData?.roomId || null;
   const navigate = useNavigate();
   const { user, token } = useOutletContext<{
     user: UserProfile;
