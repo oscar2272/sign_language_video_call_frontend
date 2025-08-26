@@ -1,20 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
-import { useOutletContext, useNavigate } from "react-router";
+import { useOutletContext, useNavigate, useParams } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
-import type { Route } from "./+types/call-page";
 
-export const loader = async ({ params }: Route.LoaderArgs) => {
+// Route 타입이 없는 경우를 위한 대체
+interface LoaderData {
+  roomId: string | null;
+}
+
+interface ComponentProps {
+  loaderData: LoaderData;
+}
+
+export const loader = async ({ params }: { params: { id?: string } }) => {
   return { roomId: params.id || null };
 };
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const CALL_API_URL = `${BASE_URL}/api/calls`;
 const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-export default function CallPage({ loaderData }: Route.ComponentProps) {
-  const { roomId } = loaderData;
+export default function CallPage({ loaderData }: ComponentProps) {
+  const params = useParams();
+  const roomId = loaderData?.roomId || params.id || null;
   const navigate = useNavigate();
   const { user, token } = useOutletContext<{
     user: UserProfile;
@@ -69,6 +78,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // 미디어 스트림 초기화
   const initializeMedia = async () => {
     try {
+      // 브라우저 호환성 체크
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("이 브라우저는 미디어 접근을 지원하지 않습니다.");
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
@@ -80,7 +94,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       return stream;
     } catch (error) {
       console.error("미디어 접근 실패:", error);
-      alert("카메라와 마이크 접근이 필요합니다.");
+      // 에러를 던지지 않고 null 반환으로 변경
+      setCallStatus("ended");
       return null;
     }
   };
@@ -312,23 +327,40 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 초기화
   useEffect(() => {
-    if (!roomId || !user.id || !token) {
+    if (!roomId) {
       navigate("/friends");
       return;
     }
 
+    // user나 token이 없는 경우 처리
+    if (!user?.id || !token) {
+      console.log("User 또는 token이 없음:", {
+        user: user?.id,
+        hasToken: !!token,
+      });
+      // navigate("/friends"); // 주석 처리해서 에러 방지
+      return;
+    }
+
     const initialize = async () => {
-      const stream = await initializeMedia();
-      if (stream) {
-        initializeWebSocket();
-        initializePeerConnection(stream);
+      try {
+        const stream = await initializeMedia();
+        if (stream) {
+          initializeWebSocket();
+          initializePeerConnection(stream);
+        } else {
+          console.log("미디어 초기화 실패");
+        }
+      } catch (error) {
+        console.error("초기화 실패:", error);
+        setCallStatus("ended");
       }
     };
 
     initialize();
 
     return cleanup;
-  }, [roomId, user.id, token]);
+  }, [roomId, user?.id, token]);
 
   if (!roomId) {
     return <div>잘못된 통화방입니다.</div>;
