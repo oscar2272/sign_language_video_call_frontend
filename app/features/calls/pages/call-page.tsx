@@ -50,8 +50,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     initLocalStream();
   }, []);
 
-  // 2️⃣ PeerConnection 생성 함수 (항상 localStream 트랙 추가)
-  const getOrCreatePeerConnection = (): RTCPeerConnection => {
+  // 2️⃣ PeerConnection 생성 + 트랙 추가
+  const createPeerConnection = (): RTCPeerConnection => {
     if (pcRef.current) return pcRef.current;
 
     const pc = new RTCPeerConnection({
@@ -71,7 +71,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
-    // localStream이 준비되면 트랙 추가
     if (localStream) {
       localStream
         .getTracks()
@@ -86,6 +85,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (!roomId || !localStream) return;
 
+    const pc = createPeerConnection();
+
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${userId}`
     );
@@ -99,8 +100,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
       console.log("WS 메시지:", msg);
-
-      const pc = getOrCreatePeerConnection();
 
       switch (msg.type) {
         case "call_request":
@@ -151,7 +150,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onclose = () => console.log("❌ WS disconnected");
 
-    return () => ws.close();
+    return () => {
+      pc.close();
+      localStream.getTracks().forEach((t) => t.stop());
+      ws.close();
+    };
   }, [roomId, localStream, ended]);
 
   // 4️⃣ 통화 종료
@@ -195,7 +198,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white">
       {callStatus === "calling" && (
-        <p className="text-lg mb-4">📞 상대방이 전화를 받고 있습니다...</p>
+        <p className="text-lg mb-4">📞 전화를 걸고 있습니다 ...</p>
       )}
       {callStatus === "rejected" && (
         <p className="text-lg mb-4 text-red-500">
