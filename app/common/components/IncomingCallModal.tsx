@@ -1,7 +1,9 @@
+// IncomingCallModal.tsx
 import { useState, useEffect } from "react";
 import { Button } from "~/common/components/ui/button";
 import type { IncomingCall } from "~/features/calls/type";
 import { useNavigate } from "react-router";
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const CALL_API_URL = `${BASE_URL}/api/calls`;
 
@@ -9,8 +11,8 @@ interface Props {
   call: IncomingCall;
   token: string;
   duration?: number; // 자동 닫기 시간(ms)
-  onAccept?: () => void; // optional
-  onReject?: () => void; // optional
+  onAccept?: () => void;
+  onReject?: () => void;
 }
 
 export default function IncomingCallModal({
@@ -24,16 +26,12 @@ export default function IncomingCallModal({
   const [timeLeft, setTimeLeft] = useState(duration / 1000);
   const navigate = useNavigate();
 
-  // 1️⃣ 모달 열기
   useEffect(() => setVisible(true), []);
 
-  // 2️⃣ 타이머
   useEffect(() => {
     if (!visible) return;
 
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
+    const interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
 
     if (timeLeft <= 1) {
       clearInterval(interval);
@@ -41,8 +39,6 @@ export default function IncomingCallModal({
 
       // 부재중 처리
       (async () => {
-        console.log("romm_id", call.room_id);
-        console.log("from_user_id", call.from_user_id);
         try {
           await fetch(`${CALL_API_URL}/missed/`, {
             method: "POST",
@@ -65,7 +61,6 @@ export default function IncomingCallModal({
     return () => clearInterval(interval);
   }, [visible, timeLeft, token, call, onReject]);
 
-  // 3️⃣ 수락
   const handleAccept = async () => {
     try {
       await fetch(`${CALL_API_URL}/accept/`, {
@@ -87,7 +82,6 @@ export default function IncomingCallModal({
     }
   };
 
-  // 4️⃣ 거절
   const handleReject = async () => {
     try {
       await fetch(`${CALL_API_URL}/reject/`, {
@@ -108,12 +102,10 @@ export default function IncomingCallModal({
     }
   };
 
-  return (
+  return visible ? (
     <div
-      className={`fixed top-20 left-4 w-64 bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200 z-50 flex flex-col p-4
-        transform transition-transform duration-300 ${
-          visible ? "translate-x-0" : "-translate-x-full"
-        }`}
+      className="fixed top-20 left-4 w-64 bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200 z-50 flex flex-col p-4
+      transform transition-transform duration-300 translate-x-0"
     >
       <h2 className="text-md font-semibold mb-1 truncate">
         📞 {call.from_user_name} 님의 전화
@@ -133,5 +125,5 @@ export default function IncomingCallModal({
         </Button>
       </div>
     </div>
-  );
+  ) : null;
 }
