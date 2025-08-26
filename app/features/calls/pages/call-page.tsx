@@ -1,18 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Button } from "~/common/components/ui/button";
-import { useOutletContext } from "react-router";
+import { useNavigate, useOutletContext } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
+import type { Route } from "./+types/call-page";
+import { Button } from "~/common/components/ui/button";
 
 const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
-
-export default function CallPage({
-  loaderData,
-}: {
-  loaderData: { roomId: string };
-}) {
+export const loader = async ({ params }: Route.LoaderArgs) => {
+  return { roomId: params.id || null };
+};
+export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
-  const { user } = useOutletContext<{ user: UserProfile; token: string }>();
+  const { user, token } = useOutletContext<{
+    user: UserProfile;
+    token: string;
+  }>();
+  const navigate = useNavigate();
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -25,150 +28,193 @@ export default function CallPage({
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
-  // 1️⃣ 로컬 스트림 가져오기
+  // ========================
+  // WebSocket 연결
+  // ========================
   useEffect(() => {
-    const initLocalStream = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
-        setLocalStream(stream);
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-      } catch (err) {
-        console.error("카메라/마이크 접근 실패:", err);
-      }
-    };
-    initLocalStream();
-  }, []);
-
-  // 2️⃣ WebSocket 연결
-  useEffect(() => {
-    if (!roomId || !user.id) return;
+    if (!roomId) return;
 
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`
     );
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("WebSocket 연결됨");
-    ws.onclose = () => console.log("WebSocket 종료");
-    ws.onerror = (err) => console.error("WebSocket 에러", err);
+    ws.onopen = () => console.log("WebSocket connected");
+    ws.onclose = () => console.log("WebSocket disconnected");
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
-      const type = data.type;
 
-      if (type === "offer") await handleOffer(data);
-      else if (type === "answer") await handleAnswer(data);
-      else if (type === "ice") await handleICE(data);
-      else if (type === "end_call") handleEndCall();
-      else if (type === "rejected") setCallStatus("rejected");
-    };
-
-    return () => ws.close();
-  }, [roomId, user.id, localStream]);
-
-  // 3️⃣ PeerConnection 초기화
-  const initPeerConnection = (stream: MediaStream) => {
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-
-    // 로컬 트랙 추가
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-    // 원격 트랙 수신
-    pc.ontrack = (event) => {
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        setRemoteStream(remoteStream);
-        if (remoteVideoRef.current)
-          remoteVideoRef.current.srcObject = remoteStream;
+      switch (data.type) {
+        case "call_request":
+        case "offer":
+          await handleOffer(data);
+          break;
+        case "answer":
+          await handleAnswer(data);
+          break;
+        case "ice":
+          if (data.candidate && pcRef.current) {
+            await pcRef.current.addIceCandidate(
+              new RTCIceCandidate(data.candidate)
+            );
+          }
+          break;
+        case "end_call":
+          setCallStatus("ended");
+          closeConnection();
+          break;
+        case "rejected":
+          setCallStatus("rejected");
+          alert("상대방이 통화를 거절했습니다.");
+          navigate(-1);
+          break;
       }
     };
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate)
-        sendSignal({ type: "ice", candidate: event.candidate });
+    return () => ws.close();
+  }, [roomId]);
+
+  // ========================
+  // WebRTC 초기화
+  // ========================
+  const initConnection = async () => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+    pcRef.current = pc;
+
+    // 로컬 스트림
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    setLocalStream(stream);
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+    // 원격 스트림
+    const remote = new MediaStream();
+    setRemoteStream(remote);
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
+
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach((track) => remote.addTrack(track));
     };
 
-    return pc;
+    // ICE candidate 전송
+    pc.onicecandidate = (event) => {
+      if (event.candidate && wsRef.current) {
+        wsRef.current.send(
+          JSON.stringify({ type: "ice", candidate: event.candidate })
+        );
+      }
+    };
   };
 
-  // 4️⃣ 신호 전송
-  const sendSignal = (data: any) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(data));
-    }
-  };
-
-  // 5️⃣ Offer 처리
+  // ========================
+  // Offer 처리
+  // ========================
   const handleOffer = async (data: any) => {
-    if (!localStream) return; // 로컬 스트림 준비 후 처리
-    const pc = initPeerConnection(localStream);
-    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    sendSignal({ type: "answer", answer });
-    setCallStatus("accepted");
+    if (!pcRef.current) await initConnection();
+
+    await pcRef.current!.setRemoteDescription(
+      new RTCSessionDescription(data.offer)
+    );
+    const answer = await pcRef.current!.createAnswer();
+    await pcRef.current!.setLocalDescription(answer);
+
+    wsRef.current?.send(JSON.stringify({ type: "answer", answer }));
   };
 
-  // 6️⃣ Answer 처리
+  // ========================
+  // Answer 처리
+  // ========================
   const handleAnswer = async (data: any) => {
-    const pc = pcRef.current;
-    if (!pc) return;
-    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-    setCallStatus("accepted");
-  };
-
-  // 7️⃣ ICE 처리
-  const handleICE = async (data: any) => {
-    try {
-      const pc = pcRef.current;
-      if (!pc) return;
-      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-    } catch (err) {
-      console.error("ICE candidate 추가 실패:", err);
+    if (pcRef.current) {
+      await pcRef.current.setRemoteDescription(
+        new RTCSessionDescription(data.answer)
+      );
     }
   };
 
-  // 8️⃣ 통화 종료 처리
-  const handleEndCall = () => {
-    setCallStatus("ended");
+  // ========================
+  // 수락 버튼
+  // ========================
+  const handleAccept = async () => {
+    setCallStatus("accepted");
+    await initConnection();
+
+    wsRef.current?.send(JSON.stringify({ type: "accepted" }));
+  };
+
+  // ========================
+  // 거절 버튼
+  // ========================
+  const handleReject = () => {
+    wsRef.current?.send(JSON.stringify({ type: "rejected" }));
+    setCallStatus("rejected");
+    navigate(-1);
+  };
+
+  // ========================
+  // 연결 종료
+  // ========================
+  const closeConnection = () => {
+    localStream?.getTracks().forEach((t) => t.stop());
+    remoteStream?.getTracks().forEach((t) => t.stop());
     pcRef.current?.close();
     pcRef.current = null;
   };
 
-  const endCall = () => {
-    sendSignal({ type: "end_call" });
-    handleEndCall();
-  };
-
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
-      <div className="flex gap-2">
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          className="w-48 h-36 bg-black rounded"
-        />
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          className="w-48 h-36 bg-black rounded"
-        />
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        {callStatus === "accepted" && (
-          <Button onClick={endCall} variant="destructive">
-            통화 종료
+  // ========================
+  // UI
+  // ========================
+  if (callStatus === "calling") {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-4">
+        <h2>📞 전화가 걸려왔습니다.</h2>
+        <div className="flex gap-2">
+          <Button onClick={handleAccept}>수락</Button>
+          <Button onClick={handleReject} variant="destructive">
+            거절
           </Button>
-        )}
+        </div>
       </div>
+    );
+  }
 
-      <p className="mt-2 text-sm text-gray-600">상태: {callStatus}</p>
-    </div>
-  );
+  if (callStatus === "accepted") {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-4">
+        <div className="flex gap-2">
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            className="w-48 h-36 bg-black"
+          />
+          <video ref={remoteVideoRef} autoPlay className="w-48 h-36 bg-black" />
+        </div>
+        <Button
+          variant="destructive"
+          onClick={() => {
+            wsRef.current?.send(JSON.stringify({ type: "end_call" }));
+            setCallStatus("ended");
+            closeConnection();
+            navigate(-1);
+          }}
+        >
+          통화 종료
+        </Button>
+      </div>
+    );
+  }
+
+  if (callStatus === "ended" || callStatus === "rejected") {
+    return <h2 className="text-center mt-20">통화가 종료되었습니다.</h2>;
+  }
+
+  return null;
 }
