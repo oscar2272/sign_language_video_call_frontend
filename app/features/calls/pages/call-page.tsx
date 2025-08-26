@@ -108,18 +108,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("WebSocket connected");
-      // 발신자의 경우에만 call_request 전송
-      if (isInitiator) {
-        console.log("Sending call_request as initiator");
-        ws.send(
-          JSON.stringify({
-            type: "call_request",
-            from_user_name: user.profile?.nickname || "Unknown",
-          })
-        );
-      } else {
-        console.log("Connected as receiver, waiting for signals");
-      }
+      // 같은 룸에 들어온 사용자들끼리 바로 연결 시작
+      console.log("Starting connection process for room:", roomId);
     };
 
     ws.onmessage = async (event) => {
@@ -127,25 +117,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       console.log("WebSocket message received:", data);
 
       switch (data.type) {
-        case "call_request":
-          console.log("Received call_request");
-          // 수신자는 자동으로 연결 준비 (IncomingCallModal에서 수락 처리됨)
-          if (!isInitiator) {
-            setCallStatus("connecting");
-          }
-          break;
-
-        case "accepted":
-          console.log("Call accepted, creating offer...");
+        case "user_joined":
+          // 새 사용자가 룸에 들어왔을 때
+          console.log("User joined room, starting offer process");
           setCallStatus("connecting");
-          // PeerConnection과 로컬 스트림이 준비된 후 offer 생성
-          setTimeout(() => createOffer(), 100);
-          break;
-
-        case "rejected":
-          console.log("Call rejected");
-          setCallStatus("rejected");
-          setTimeout(() => navigate("/friends"), 2000);
+          setTimeout(() => createOffer(), 500);
           break;
 
         case "offer":
@@ -410,7 +386,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       return;
     }
 
-    // URL에서 현재 사용자가 발신자인지 수신자인지 판단
     const urlParams = new URLSearchParams(window.location.search);
     const isReceiver = urlParams.get("receiver") === "true";
     setIsInitiator(!isReceiver);
@@ -426,16 +401,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       pcRef.current = createPeerConnection();
       wsRef.current = connectWebSocket();
-
-      // 수신자의 경우 자동으로 accepted 신호 전송
-      if (isReceiver) {
-        setTimeout(() => {
-          console.log("Auto-sending accepted signal for receiver");
-          if (wsRef.current) {
-            wsRef.current.send(JSON.stringify({ type: "accepted" }));
-          }
-        }, 1000); // WebSocket 연결 후 1초 대기
-      }
     };
 
     init();
