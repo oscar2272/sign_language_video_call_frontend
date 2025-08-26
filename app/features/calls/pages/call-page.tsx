@@ -15,17 +15,17 @@ const WS_BASE_URL =
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
   const { roomId } = loaderData;
+  const navigate = useNavigate();
   const { user, token } = useOutletContext<{
     user: UserProfile;
     token: string;
   }>();
-  const navigate = useNavigate();
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [callStatus, setCallStatus] = useState<
-    "connecting" | "calling" | "accepted" | "rejected" | "ended"
-  >("connecting");
+    "calling" | "accepted" | "rejected" | "ended"
+  >("calling");
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [ended, setEnded] = useState(false);
@@ -35,70 +35,131 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const callStartTimeRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // WebSocket 연결 설정
-  const initWebSocket = () => {
-    if (!roomId || !user) return;
+  // WebRTC 설정
+  const pcConfig = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ],
+  };
 
+  // 컴포넌트 정리 함수
+  const cleanup = () => {
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+    }
+    if (remoteStream) {
+      remoteStream.getTracks().forEach((track) => track.stop());
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+    }
+  };
+
+  // 미디어 스트림 초기화
+  const initializeMedia = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+      return stream;
+    } catch (error) {
+      console.error("미디어 접근 실패:", error);
+      alert("카메라와 마이크 접근이 필요합니다.");
+      return null;
+    }
+  };
+
+  // WebSocket 초기화
+  const initializeWebSocket = () => {
     const wsUrl = `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`;
-    wsRef.current = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
 
-    wsRef.current.onopen = () => {
-      console.log("WebSocket connected");
-      setCallStatus("calling");
+    ws.onopen = () => {
+      console.log("WebSocket 연결됨");
     };
 
-    wsRef.current.onmessage = async (event) => {
+    ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
+      console.log("수신한 메시지:", data);
 
       switch (data.type) {
-        case "offer":
-          await handleOffer(data);
+        case "call_request":
+          // 발신자가 받는 경우는 없음 (이미 통화 페이지에 있음)
           break;
-        case "answer":
-          await handleAnswer(data);
-          break;
-        case "ice":
-          await handleIce(data);
-          break;
+
         case "accepted":
           setCallStatus("accepted");
           startCallTimer();
+          await createOffer();
           break;
+
         case "rejected":
           setCallStatus("rejected");
           setTimeout(() => {
-            navigate("/");
+            navigate("/friends");
           }, 2000);
           break;
+
+        case "offer":
+          await handleOffer(data.offer);
+          break;
+
+        case "answer":
+          await handleAnswer(data.answer);
+          break;
+
+        case "ice":
+          await handleIceCandidate(data.candidate);
+          break;
+
         case "end_call":
           setCallStatus("ended");
           setEnded(true);
           cleanup();
           setTimeout(() => {
-            navigate("/");
+            navigate("/friends");
           }, 2000);
           break;
       }
     };
 
-    wsRef.current.onerror = (error) => {
-      console.error("WebSocket error:", error);
+    ws.onclose = () => {
+      console.log("WebSocket 연결 종료");
     };
 
-    wsRef.current.onclose = () => {
-      console.log("WebSocket closed");
+    ws.onerror = (error) => {
+      console.error("WebSocket 에러:", error);
     };
+
+    wsRef.current = ws;
   };
 
-  // WebRTC 연결 설정
-  const initPeerConnection = () => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  // RTCPeerConnection 초기화
+  const initializePeerConnection = (stream: MediaStream) => {
+    const pc = new RTCPeerConnection(pcConfig);
+
+    // 로컬 스트림 추가
+    stream.getTracks().forEach((track) => {
+      pc.addTrack(track, stream);
     });
 
+    // ICE candidate 이벤트
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current) {
         wsRef.current.send(
@@ -110,121 +171,84 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     };
 
+    // 원격 스트림 수신
     pc.ontrack = (event) => {
-      setRemoteStream(event.streams[0]);
+      const [remoteStream] = event.streams;
+      setRemoteStream(remoteStream);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
     };
 
     pcRef.current = pc;
   };
 
-  // 미디어 스트림 가져오기
-  const initMediaStream = async () => {
+  // Offer 생성
+  const createOffer = async () => {
+    if (!pcRef.current || !wsRef.current) return;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      setLocalStream(stream);
+      const offer = await pcRef.current.createOffer();
+      await pcRef.current.setLocalDescription(offer);
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-
-      // PeerConnection에 트랙 추가
-      if (pcRef.current) {
-        stream.getTracks().forEach((track) => {
-          pcRef.current?.addTrack(track, stream);
-        });
-      }
-
-      return stream;
-    } catch (error) {
-      console.error("Error accessing media devices:", error);
-      alert("카메라와 마이크 접근 권한이 필요합니다.");
-      navigate("/");
-    }
-  };
-
-  // Offer 처리
-  const handleOffer = async (data: any) => {
-    if (!pcRef.current) return;
-
-    await pcRef.current.setRemoteDescription(data.offer);
-    const answer = await pcRef.current.createAnswer();
-    await pcRef.current.setLocalDescription(answer);
-
-    if (wsRef.current) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "answer",
-          answer: answer,
-        })
-      );
-    }
-  };
-
-  // Answer 처리
-  const handleAnswer = async (data: any) => {
-    if (!pcRef.current) return;
-    await pcRef.current.setRemoteDescription(data.answer);
-  };
-
-  // ICE candidate 처리
-  const handleIce = async (data: any) => {
-    if (!pcRef.current) return;
-    await pcRef.current.addIceCandidate(data.candidate);
-  };
-
-  // Offer 생성 및 전송
-  const makeOffer = async () => {
-    if (!pcRef.current) return;
-
-    const offer = await pcRef.current.createOffer();
-    await pcRef.current.setLocalDescription(offer);
-
-    if (wsRef.current) {
       wsRef.current.send(
         JSON.stringify({
           type: "offer",
           offer: offer,
         })
       );
+    } catch (error) {
+      console.error("Offer 생성 실패:", error);
     }
   };
 
-  // 통화 시간 타이머 시작
+  // Offer 처리
+  const handleOffer = async (offer: RTCSessionDescriptionInit) => {
+    if (!pcRef.current || !wsRef.current) return;
+
+    try {
+      await pcRef.current.setRemoteDescription(offer);
+      const answer = await pcRef.current.createAnswer();
+      await pcRef.current.setLocalDescription(answer);
+
+      wsRef.current.send(
+        JSON.stringify({
+          type: "answer",
+          answer: answer,
+        })
+      );
+    } catch (error) {
+      console.error("Offer 처리 실패:", error);
+    }
+  };
+
+  // Answer 처리
+  const handleAnswer = async (answer: RTCSessionDescriptionInit) => {
+    if (!pcRef.current) return;
+
+    try {
+      await pcRef.current.setRemoteDescription(answer);
+    } catch (error) {
+      console.error("Answer 처리 실패:", error);
+    }
+  };
+
+  // ICE Candidate 처리
+  const handleIceCandidate = async (candidate: RTCIceCandidateInit) => {
+    if (!pcRef.current) return;
+
+    try {
+      await pcRef.current.addIceCandidate(candidate);
+    } catch (error) {
+      console.error("ICE candidate 처리 실패:", error);
+    }
+  };
+
+  // 통화 시간 측정 시작
   const startCallTimer = () => {
-    callStartTimeRef.current = Date.now();
     durationIntervalRef.current = setInterval(() => {
-      if (callStartTimeRef.current) {
-        const elapsed = Math.floor(
-          (Date.now() - callStartTimeRef.current) / 1000
-        );
-        setCallDuration(elapsed);
-      }
+      setCallDuration((prev) => prev + 1);
     }, 1000);
-  };
-
-  // 카메라 토글
-  const toggleCamera = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsCameraOn(videoTrack.enabled);
-      }
-    }
-  };
-
-  // 마이크 토글
-  const toggleMic = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsMicOn(audioTrack.enabled);
-      }
-    }
   };
 
   // 통화 종료
@@ -250,27 +274,32 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
     } catch (err) {
       console.error("Failed to end call:", err);
-      alert("Failed to end call. Please try again.");
     }
 
     setTimeout(() => {
-      navigate("/");
+      navigate("/friends");
     }, 2000);
   };
 
-  // 리소스 정리
-  const cleanup = () => {
+  // 카메라 토글
+  const toggleCamera = () => {
     if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCameraOn(videoTrack.enabled);
+      }
     }
-    if (pcRef.current) {
-      pcRef.current.close();
-    }
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
+  };
+
+  // 마이크 토글
+  const toggleMic = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMicOn(audioTrack.enabled);
+      }
     }
   };
 
@@ -281,74 +310,66 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // 컴포넌트 마운트 시 초기화
+  // 초기화
   useEffect(() => {
-    if (!roomId || !user) {
-      navigate("/");
+    if (!roomId || !user.id || !token) {
+      navigate("/friends");
       return;
     }
 
-    const init = async () => {
-      initPeerConnection();
-      await initMediaStream();
-      initWebSocket();
+    const initialize = async () => {
+      const stream = await initializeMedia();
+      if (stream) {
+        initializeWebSocket();
+        initializePeerConnection(stream);
+      }
     };
 
-    init();
+    initialize();
 
-    return () => {
-      cleanup();
-    };
-  }, [roomId, user, navigate]);
-
-  // 연결 후 Offer 생성
-  useEffect(() => {
-    if (callStatus === "calling" && pcRef.current && localStream) {
-      // 약간의 딜레이 후 offer 생성 (상대방 준비 대기)
-      setTimeout(() => {
-        makeOffer();
-      }, 1000);
-    }
-  }, [callStatus, localStream]);
-
-  // remoteStream이 설정되면 비디오 요소에 연결
-  useEffect(() => {
-    if (remoteStream && remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-  }, [remoteStream]);
+    return cleanup;
+  }, [roomId, user.id, token]);
 
   if (!roomId) {
-    return <div>잘못된 통화 ID입니다.</div>;
+    return <div>잘못된 통화방입니다.</div>;
   }
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white">
-      {/* 상태 표시 */}
-      <div className="flex justify-between items-center p-4 bg-gray-900">
-        <div className="text-sm">
-          {callStatus === "connecting" && "연결 중..."}
-          {callStatus === "calling" && "통화 중..."}
-          {callStatus === "accepted" &&
-            `통화 시간: ${formatDuration(callDuration)}`}
-          {callStatus === "rejected" && "통화가 거절되었습니다"}
-          {callStatus === "ended" && "통화가 종료되었습니다"}
+    <div className="flex flex-col h-screen bg-gray-900 text-white">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center p-4 bg-gray-800">
+        <div className="flex flex-col">
+          <h1 className="text-lg font-semibold">화상 통화</h1>
+          {callStatus === "accepted" && (
+            <span className="text-sm text-green-400">
+              통화 중 - {formatDuration(callDuration)}
+            </span>
+          )}
+          {callStatus === "calling" && (
+            <span className="text-sm text-yellow-400">연결 중...</span>
+          )}
+          {callStatus === "rejected" && (
+            <span className="text-sm text-red-400">통화가 거절되었습니다</span>
+          )}
+          {callStatus === "ended" && (
+            <span className="text-sm text-gray-400">통화가 종료되었습니다</span>
+          )}
         </div>
-        <div className="text-sm">Room ID: {roomId}</div>
+        <div className="text-sm text-gray-300">Room: {roomId}</div>
       </div>
 
       {/* 비디오 영역 */}
       <div className="flex-1 relative">
-        {/* 원격 비디오 (전체 화면) */}
+        {/* 원격 비디오 (메인) */}
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover bg-gray-800"
         />
 
-        {/* 로컬 비디오 (PiP) */}
-        <div className="absolute top-4 right-4 w-40 h-30 bg-gray-800 rounded-lg overflow-hidden">
+        {/* 로컬 비디오 (작은 창) */}
+        <div className="absolute top-4 right-4 w-32 h-24 bg-gray-700 rounded-lg overflow-hidden border-2 border-gray-500">
           <video
             ref={localVideoRef}
             autoPlay
@@ -356,80 +377,75 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             muted
             className="w-full h-full object-cover"
           />
-          {!isCameraOn && (
-            <div className="absolute inset-0 bg-gray-700 flex items-center justify-center">
-              <span className="text-xs">카메라 꺼짐</span>
-            </div>
-          )}
         </div>
 
-        {/* 상태별 오버레이 */}
-        {(callStatus === "calling" || callStatus === "connecting") &&
-          !remoteStream && (
-            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-                <p className="text-lg">
-                  {callStatus === "connecting"
-                    ? "연결 중..."
-                    : "상대방을 기다리는 중..."}
-                </p>
-              </div>
-            </div>
-          )}
-
-        {callStatus === "rejected" && (
-          <div className="absolute inset-0 bg-red-600 bg-opacity-80 flex items-center justify-center">
+        {/* 연결 상태 메시지 */}
+        {callStatus === "calling" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
             <div className="text-center">
-              <p className="text-xl mb-2">❌</p>
-              <p className="text-lg">통화가 거절되었습니다</p>
-              <p className="text-sm">곧 이전 페이지로 돌아갑니다...</p>
+              <div className="animate-pulse text-2xl mb-4">📞</div>
+              <div className="text-lg">상대방을 기다리는 중...</div>
             </div>
           </div>
         )}
 
-        {ended && (
-          <div className="absolute inset-0 bg-gray-800 bg-opacity-80 flex items-center justify-center">
+        {callStatus === "rejected" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
             <div className="text-center">
-              <p className="text-xl mb-2">📞</p>
-              <p className="text-lg">통화가 종료되었습니다</p>
-              <p className="text-sm">곧 이전 페이지로 돌아갑니다...</p>
+              <div className="text-2xl mb-4">❌</div>
+              <div className="text-lg">통화가 거절되었습니다</div>
+              <div className="text-sm text-gray-300 mt-2">
+                친구 목록으로 돌아갑니다...
+              </div>
+            </div>
+          </div>
+        )}
+
+        {callStatus === "ended" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="text-center">
+              <div className="text-2xl mb-4">📞</div>
+              <div className="text-lg">통화가 종료되었습니다</div>
+              <div className="text-sm text-gray-300 mt-2">
+                친구 목록으로 돌아갑니다...
+              </div>
             </div>
           </div>
         )}
       </div>
 
       {/* 컨트롤 버튼 */}
-      {callStatus !== "ended" && callStatus !== "rejected" && !ended && (
-        <div className="flex justify-center items-center p-6 bg-gray-900 gap-4">
-          <Button
-            onClick={toggleMic}
-            variant={isMicOn ? "default" : "destructive"}
-            size="lg"
-            className="rounded-full w-16 h-16"
-          >
-            {isMicOn ? "🎤" : "🔇"}
-          </Button>
+      <div className="flex justify-center items-center gap-4 p-6 bg-gray-800">
+        <Button
+          onClick={toggleMic}
+          variant={isMicOn ? "default" : "destructive"}
+          size="lg"
+          className="w-12 h-12 rounded-full"
+          disabled={ended}
+        >
+          {isMicOn ? "🎤" : "🎤"}
+        </Button>
 
-          <Button
-            onClick={endCall}
-            variant="destructive"
-            size="lg"
-            className="rounded-full w-20 h-20 text-2xl"
-          >
-            📞
-          </Button>
+        <Button
+          onClick={toggleCamera}
+          variant={isCameraOn ? "default" : "destructive"}
+          size="lg"
+          className="w-12 h-12 rounded-full"
+          disabled={ended}
+        >
+          {isCameraOn ? "📹" : "📹"}
+        </Button>
 
-          <Button
-            onClick={toggleCamera}
-            variant={isCameraOn ? "default" : "destructive"}
-            size="lg"
-            className="rounded-full w-16 h-16"
-          >
-            {isCameraOn ? "📹" : "📷"}
-          </Button>
-        </div>
-      )}
+        <Button
+          onClick={endCall}
+          variant="destructive"
+          size="lg"
+          className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700"
+          disabled={ended}
+        >
+          📞
+        </Button>
+      </div>
     </div>
   );
 }
