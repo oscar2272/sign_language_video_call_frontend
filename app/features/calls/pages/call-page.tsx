@@ -32,11 +32,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoRef>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const connectionTimeRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+
+  // 🔥 핵심: 실제 스트림 객체를 ref로 관리
+  const localStreamRef = useRef<MediaStream | null>(null);
 
   // 디버그 로그 함수
   const addDebugLog = (message: string) => {
@@ -101,8 +104,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return pc;
   };
 
-  // 미디어 스트림 초기화
-  const initializeMedia = async () => {
+  // 🔥 수정된 미디어 스트림 초기화
+  const initializeMedia = async (): Promise<MediaStream | null> => {
     try {
       addDebugLog("Requesting media access...");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -110,6 +113,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         audio: true,
       });
 
+      // 🔥 중요: ref와 state 모두 업데이트
+      localStreamRef.current = stream;
       setLocalStream(stream);
       addDebugLog("Media access granted");
 
@@ -117,7 +122,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         localVideoRef.current.srcObject = stream;
       }
 
-      return stream;
+      return stream; // 🔥 스트림을 직접 반환
     } catch (error) {
       addDebugLog(`Media access error: ${error}`);
       alert("카메라와 마이크 접근 권한이 필요합니다.");
@@ -125,18 +130,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // WebSocket 연결
-  const connectWebSocket = () => {
+  // WebSocket 연결 - 스트림을 매개변수로 받음
+  const connectWebSocket = (stream: MediaStream) => {
     addDebugLog("Connecting to WebSocket...");
     const ws = new WebSocket(
       `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`
     );
 
     ws.onopen = () => {
-      addDebugLog("WebSocket connected - starting connection immediately");
+      addDebugLog("WebSocket connected - ready for signaling");
       setCallStatus("connecting");
-      // 바로 연결 시도
-      setTimeout(() => createOffer(), 1500);
     };
 
     ws.onmessage = async (event) => {
@@ -147,12 +150,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         case "user_joined":
           addDebugLog("User joined, creating offer");
           setCallStatus("connecting");
-          setTimeout(() => createOffer(), 500);
+          // 🔥 스트림을 직접 전달
+          setTimeout(() => createOffer(stream), 500);
           break;
 
         case "offer":
           addDebugLog("Received offer, handling...");
-          await handleOffer(data.offer);
+          await handleOffer(data.offer, stream);
           break;
 
         case "answer":
@@ -184,28 +188,25 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return ws;
   };
 
-  // Offer 생성
-  const createOffer = async () => {
+  // 🔥 수정된 Offer 생성 - 스트림을 매개변수로 받음
+  const createOffer = async (stream: MediaStream) => {
     addDebugLog("Creating offer...");
 
-    if (!localStream) {
-      addDebugLog("Local stream not ready! Retrying in 1 second...");
-      setTimeout(() => createOffer(), 1000);
+    if (!stream) {
+      addDebugLog("Stream not provided to createOffer");
       return;
     }
 
-    addDebugLog(
-      `Local stream ready with ${localStream.getTracks().length} tracks`
-    );
+    addDebugLog(`Stream ready with ${stream.getTracks().length} tracks`);
 
     // PeerConnection 생성 및 트랙 추가
     const pc = createPeerConnection();
     pcRef.current = pc;
 
-    // 로컬 스트림 트랙들을 먼저 추가
-    localStream.getTracks().forEach((track) => {
+    // 스트림 트랙들을 먼저 추가
+    stream.getTracks().forEach((track) => {
       addDebugLog(`Adding ${track.kind} track to peer connection`);
-      pc.addTrack(track, localStream);
+      pc.addTrack(track, stream);
     });
 
     try {
@@ -233,12 +234,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // Offer 처리
-  const handleOffer = async (offer: RTCSessionDescriptionInit) => {
+  // 🔥 수정된 Offer 처리 - 스트림을 매개변수로 받음
+  const handleOffer = async (
+    offer: RTCSessionDescriptionInit,
+    stream: MediaStream
+  ) => {
     addDebugLog("Handling offer...");
 
-    if (!localStream) {
-      addDebugLog("Local stream not ready for handling offer");
+    if (!stream) {
+      addDebugLog("Stream not available for handling offer");
       return;
     }
 
@@ -246,9 +250,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     const pc = createPeerConnection();
     pcRef.current = pc;
 
-    localStream.getTracks().forEach((track) => {
+    stream.getTracks().forEach((track) => {
       addDebugLog(`Adding ${track.kind} track to peer connection`);
-      pc.addTrack(track, localStream);
+      pc.addTrack(track, stream);
     });
 
     try {
@@ -363,8 +367,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 카메라 토글
   const toggleCamera = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
+    const stream = localStreamRef.current;
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setIsCameraOn(videoTrack.enabled);
@@ -375,8 +380,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 마이크 토글
   const toggleMic = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0];
+    const stream = localStreamRef.current;
+    if (stream) {
+      const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsMicOn(audioTrack.enabled);
@@ -393,8 +399,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       clearInterval(connectionTimeRef.current);
     }
 
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
 
     if (pcRef.current) {
@@ -413,7 +419,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // 컴포넌트 초기화
+  // 🔥 수정된 컴포넌트 초기화
   useEffect(() => {
     if (!roomId) {
       navigate("/friends");
@@ -423,14 +429,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     addDebugLog("Initializing CallPage");
 
     const init = async () => {
-      // 1. 먼저 미디어 스트림을 가져옴
+      // 1. 미디어 스트림을 먼저 가져오고 기다림
       const stream = await initializeMedia();
       if (!stream) return;
 
       addDebugLog("Media stream ready, connecting WebSocket");
 
-      // 2. 미디어 스트림이 준비된 후에 WebSocket 연결
-      wsRef.current = connectWebSocket();
+      // 2. 스트림을 WebSocket 연결에 전달
+      wsRef.current = connectWebSocket(stream);
     };
 
     init();
@@ -459,7 +465,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         {callStatus === "ended" && <span>통화가 종료되었습니다</span>}
       </div>
 
-      {/* 디버그 정보 (개발 중에만 표시) */}
+      {/* 디버그 정보 */}
       <div className="bg-red-900 text-white p-2 text-xs max-h-20 overflow-y-auto">
         {debugInfo.map((info, index) => (
           <div key={index}>{info}</div>
