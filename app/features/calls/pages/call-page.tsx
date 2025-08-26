@@ -5,6 +5,8 @@ import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
+  console.log("CallPage params:", params);
+  console.log("CallPage params.id:", params.id);
   return { roomId: params.id || null };
 };
 
