@@ -31,6 +31,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [isIncoming, setIsIncoming] = useState(false);
   const [callerName, setCallerName] = useState("");
   const [connectionTime, setConnectionTime] = useState(0);
+  const [isInitiator, setIsInitiator] = useState(true); // 발신자인지 수신자인지 구분
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -107,13 +108,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     ws.onopen = () => {
       console.log("WebSocket connected");
-      // 발신자의 경우 연결 즉시 call_request 전송
-      ws.send(
-        JSON.stringify({
-          type: "call_request",
-          from_user_name: user.profile?.nickname || "Unknown",
-        })
-      );
+      // 발신자의 경우에만 call_request 전송
+      if (isInitiator) {
+        ws.send(
+          JSON.stringify({
+            type: "call_request",
+            from_user_name: user.profile?.nickname || "Unknown",
+          })
+        );
+      }
     };
 
     ws.onmessage = async (event) => {
@@ -122,8 +125,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       switch (data.type) {
         case "call_request":
-          // 이미 통화 중이 아닌 경우에만 수신 전화로 처리
-          if (callStatus === "calling") {
+          // 수신자만 수신 전화로 처리
+          if (!isInitiator) {
             setIsIncoming(true);
             setCallerName(data.from_user_name || "Unknown");
           }
@@ -298,22 +301,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       wsRef.current.send(JSON.stringify({ type: "accepted" }));
     }
 
-    // API 호출도 함께
-    try {
-      await fetch(`${CALL_API_URL}/accept/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          room_id: roomId,
-          caller_id: user.id,
-        }),
-      });
-    } catch (err) {
-      console.error("수락 API 호출 실패:", err);
-    }
+    // ✅ API 호출 제거 - 중복 생성 방지
+    // accept API는 IncomingCallModal에서 이미 호출되었음
 
     setIsIncoming(false);
     setCallStatus("connecting");
@@ -424,6 +413,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       navigate("/friends");
       return;
     }
+
+    // URL에서 현재 사용자가 발신자인지 수신자인지 판단
+    // 친구 페이지에서 "통화하기" 버튼을 누른 사용자는 발신자
+    // IncomingCallModal에서 "수락" 버튼을 누른 사용자는 수신자
+    const urlParams = new URLSearchParams(window.location.search);
+    const isReceiver = urlParams.get("receiver") === "true";
+    setIsInitiator(!isReceiver);
 
     const init = async () => {
       const stream = await initializeMedia();

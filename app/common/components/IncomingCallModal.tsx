@@ -61,6 +61,7 @@ export default function IncomingCallModal({
     return () => clearInterval(interval);
   }, [visible, timeLeft, token, call, onReject]);
 
+  // 수락
   const handleAccept = async () => {
     try {
       await fetch(`${CALL_API_URL}/accept/`, {
@@ -76,7 +77,7 @@ export default function IncomingCallModal({
       });
       setVisible(false);
       if (onAccept) onAccept();
-      else navigate(`/call/${call.room_id}`);
+      else navigate(`/call/${call.room_id}?receiver=true`); // ✅ receiver=true 추가
     } catch (err) {
       console.error("수락 기록 실패:", err);
     }
