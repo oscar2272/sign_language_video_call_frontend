@@ -1,34 +1,54 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
-import { useOutletContext, useNavigate, useParams } from "react-router";
+import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
+import type { Route } from "./+types/call-page";
 
-// Route 타입이 없는 경우를 위한 대체
-interface LoaderData {
-  roomId: string | null;
-}
-
-interface ComponentProps {
-  loaderData: LoaderData;
-}
-
-export const loader = async ({ params }: { params: { id?: string } }) => {
-  return { roomId: params.id || null };
+export const loader = async ({ params }: Route.LoaderArgs) => {
+  try {
+    return { roomId: params.id || null };
+  } catch (error) {
+    console.error("Loader error:", error);
+    throw new Response("Failed to load call page", { status: 500 });
+  }
 };
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const CALL_API_URL = `${BASE_URL}/api/calls`;
 const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-export default function CallPage({ loaderData }: ComponentProps) {
-  const params = useParams();
-  const roomId = loaderData?.roomId || params.id || null;
+export default function CallPage({ loaderData }: Route.ComponentProps) {
   const navigate = useNavigate();
-  const { user, token } = useOutletContext<{
+
+  // 안전한 초기화
+  const { roomId } = loaderData || {};
+  const context = useOutletContext<{
     user: UserProfile;
     token: string;
   }>();
+
+  // context 안전성 체크
+  if (!context) {
+    console.error("Context not found");
+    navigate("/auth/signin");
+    return <div>인증이 필요합니다...</div>;
+  }
+
+  const { user, token } = context;
+
+  // 필수 데이터 체크
+  if (!roomId) {
+    console.error("Room ID not found");
+    navigate("/friends");
+    return <div>잘못된 통화방입니다...</div>;
+  }
+
+  if (!user?.id || !token) {
+    console.error("User or token not found");
+    navigate("/auth/signin");
+    return <div>인증이 필요합니다...</div>;
+  }
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -78,15 +98,12 @@ export default function CallPage({ loaderData }: ComponentProps) {
   // 미디어 스트림 초기화
   const initializeMedia = async () => {
     try {
-      // 브라우저 호환성 체크
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("이 브라우저는 미디어 접근을 지원하지 않습니다.");
-      }
-
+      console.log("Requesting media permissions");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
+      console.log("Media stream obtained");
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -94,75 +111,83 @@ export default function CallPage({ loaderData }: ComponentProps) {
       return stream;
     } catch (error) {
       console.error("미디어 접근 실패:", error);
-      // 에러를 던지지 않고 null 반환으로 변경
-      setCallStatus("ended");
+      alert("카메라와 마이크 접근이 필요합니다.");
       return null;
     }
   };
 
   // WebSocket 초기화
   const initializeWebSocket = () => {
-    const wsUrl = `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`;
-    const ws = new WebSocket(wsUrl);
+    try {
+      const wsUrl = `${WS_BASE_URL}/ws/call/${roomId}/?user_id=${user.id}`;
+      console.log("Connecting to WebSocket:", wsUrl);
+      const ws = new WebSocket(wsUrl);
 
-    ws.onopen = () => {
-      console.log("WebSocket 연결됨");
-    };
+      ws.onopen = () => {
+        console.log("WebSocket 연결됨");
+      };
 
-    ws.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-      console.log("수신한 메시지:", data);
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("수신한 메시지:", data);
 
-      switch (data.type) {
-        case "call_request":
-          // 발신자가 받는 경우는 없음 (이미 통화 페이지에 있음)
-          break;
+          switch (data.type) {
+            case "call_request":
+              // 발신자가 받는 경우는 없음 (이미 통화 페이지에 있음)
+              break;
 
-        case "accepted":
-          setCallStatus("accepted");
-          startCallTimer();
-          await createOffer();
-          break;
+            case "accepted":
+              setCallStatus("accepted");
+              startCallTimer();
+              await createOffer();
+              break;
 
-        case "rejected":
-          setCallStatus("rejected");
-          setTimeout(() => {
-            navigate("/friends");
-          }, 2000);
-          break;
+            case "rejected":
+              setCallStatus("rejected");
+              setTimeout(() => {
+                navigate("/friends");
+              }, 2000);
+              break;
 
-        case "offer":
-          await handleOffer(data.offer);
-          break;
+            case "offer":
+              await handleOffer(data.offer);
+              break;
 
-        case "answer":
-          await handleAnswer(data.answer);
-          break;
+            case "answer":
+              await handleAnswer(data.answer);
+              break;
 
-        case "ice":
-          await handleIceCandidate(data.candidate);
-          break;
+            case "ice":
+              await handleIceCandidate(data.candidate);
+              break;
 
-        case "end_call":
-          setCallStatus("ended");
-          setEnded(true);
-          cleanup();
-          setTimeout(() => {
-            navigate("/friends");
-          }, 2000);
-          break;
-      }
-    };
+            case "end_call":
+              setCallStatus("ended");
+              setEnded(true);
+              cleanup();
+              setTimeout(() => {
+                navigate("/friends");
+              }, 2000);
+              break;
+          }
+        } catch (error) {
+          console.error("메시지 처리 오류:", error);
+        }
+      };
 
-    ws.onclose = () => {
-      console.log("WebSocket 연결 종료");
-    };
+      ws.onclose = () => {
+        console.log("WebSocket 연결 종료");
+      };
 
-    ws.onerror = (error) => {
-      console.error("WebSocket 에러:", error);
-    };
+      ws.onerror = (error) => {
+        console.error("WebSocket 에러:", error);
+      };
 
-    wsRef.current = ws;
+      wsRef.current = ws;
+    } catch (error) {
+      console.error("WebSocket 초기화 오류:", error);
+    }
   };
 
   // RTCPeerConnection 초기화
@@ -327,40 +352,49 @@ export default function CallPage({ loaderData }: ComponentProps) {
 
   // 초기화
   useEffect(() => {
-    if (!roomId) {
-      navigate("/friends");
-      return;
-    }
+    console.log("Initializing CallPage", {
+      roomId,
+      userId: user?.id,
+      hasToken: !!token,
+    });
 
-    // user나 token이 없는 경우 처리
-    if (!user?.id || !token) {
-      console.log("User 또는 token이 없음:", {
-        user: user?.id,
+    if (!roomId || !user?.id || !token) {
+      console.error("Missing required data", {
+        roomId,
+        userId: user?.id,
         hasToken: !!token,
       });
-      // navigate("/friends"); // 주석 처리해서 에러 방지
+      navigate("/friends");
       return;
     }
 
     const initialize = async () => {
       try {
+        console.log("Starting media initialization");
         const stream = await initializeMedia();
         if (stream) {
+          console.log("Media initialized, starting WebSocket");
           initializeWebSocket();
+          console.log("WebSocket initialized, starting PeerConnection");
           initializePeerConnection(stream);
+          console.log("PeerConnection initialized");
         } else {
-          console.log("미디어 초기화 실패");
+          console.error("Failed to initialize media");
+          navigate("/friends");
         }
       } catch (error) {
-        console.error("초기화 실패:", error);
-        setCallStatus("ended");
+        console.error("Initialization error:", error);
+        navigate("/friends");
       }
     };
 
     initialize();
 
-    return cleanup;
-  }, [roomId, user?.id, token]);
+    return () => {
+      console.log("Cleanup on unmount");
+      cleanup();
+    };
+  }, [roomId, user?.id, token, navigate]);
 
   if (!roomId) {
     return <div>잘못된 통화방입니다.</div>;
