@@ -85,29 +85,33 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     );
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("✅ WS connected");
-    ws.onclose = () => console.log("❌ WS disconnected");
+    ws.onopen = () => {
+      console.log("✅ WS connected");
+
+      // 수신자든 발신자든 페이지 들어오면 바로 call_request 보내기
+      ws.send(JSON.stringify({ type: "call_request" }));
+    };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
       console.log("WS 메시지:", msg);
 
-      // PeerConnection 없으면 생성
       const pc = pcRef.current || createPeerConnection();
       pcRef.current = pc;
 
       switch (msg.type) {
-        case "accepted":
+        case "call_request":
+          // 페이지 들어온 사람은 바로 accepted 신호 보내서 offer 받을 준비
+          ws.send(JSON.stringify({ type: "accepted" }));
           setCallStatus("accepted");
+          break;
 
-          // 나만 offer 생성
+        case "accepted":
+          // 내가 발신자라면 offer 생성
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           ws.send(JSON.stringify({ type: "offer", sdp: offer }));
-          break;
-
-        case "rejected":
-          setCallStatus("rejected");
+          setCallStatus("accepted");
           break;
 
         case "offer":
@@ -142,6 +146,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           break;
       }
     };
+
+    ws.onclose = () => console.log("❌ WS disconnected");
 
     return () => ws.close();
   }, [roomId, localStream, ended]);
