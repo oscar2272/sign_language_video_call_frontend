@@ -39,6 +39,9 @@ export default function IncomingCallModal({
 
       // 부재중 처리
       (async () => {
+        console.log("부재중 처리 API 호출");
+        console.log("room_id:", call.room_id);
+        console.log("caller_id:", call.from_user_id);
         try {
           await fetch(`${CALL_API_URL}/missed/`, {
             method: "POST",
