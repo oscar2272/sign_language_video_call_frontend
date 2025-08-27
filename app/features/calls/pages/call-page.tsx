@@ -509,25 +509,21 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           <Button
             onClick={toggleMic}
             variant={isMicOn ? "default" : "destructive"}
-            className="w-14 h-14 rounded-full text-xl"
+            className="px-6 py-2"
           >
-            {isMicOn ? "🎤" : "🔇"}
+            {isMicOn ? "마이크 켜짐" : "마이크 꺼짐"}
           </Button>
 
           <Button
             onClick={toggleCamera}
             variant={isCameraOn ? "default" : "destructive"}
-            className="w-14 h-14 rounded-full text-xl"
+            className="px-6 py-2"
           >
-            {isCameraOn ? "📹" : "📷"}
+            {isCameraOn ? "카메라 켜짐" : "카메라 꺼짐"}
           </Button>
 
-          <Button
-            onClick={endCall}
-            variant="destructive"
-            className="w-14 h-14 rounded-full text-xl"
-          >
-            📞
+          <Button onClick={endCall} variant="destructive" className="px-6 py-2">
+            통화 종료
           </Button>
         </div>
       </div>
