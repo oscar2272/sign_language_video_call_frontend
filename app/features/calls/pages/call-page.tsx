@@ -455,28 +455,38 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col h-screen">
-      {/* 상태 표시 */}
-      <div className="bg-gray-800 text-white p-4 text-center flex-shrink-0">
-        {callStatus === "calling" && <span>전화 거는 중...</span>}
-        {callStatus === "connecting" && <span>연결 중...</span>}
-        {callStatus === "connected" && (
-          <span>통화 중 - {formatTime(connectionTime)}</span>
+      {/* 상태 표시 - 고정 높이 */}
+      <div className="bg-gray-800 text-white p-3 text-center flex-shrink-0 min-h-[60px] flex items-center justify-center">
+        {callStatus === "calling" && (
+          <span className="text-sm sm:text-base">전화 거는 중...</span>
         )}
-        {callStatus === "rejected" && <span>통화가 거절되었습니다</span>}
-        {callStatus === "ended" && <span>통화가 종료되었습니다</span>}
+        {callStatus === "connecting" && (
+          <span className="text-sm sm:text-base">연결 중...</span>
+        )}
+        {callStatus === "connected" && (
+          <span className="text-sm sm:text-base">
+            통화 중 - {formatTime(connectionTime)}
+          </span>
+        )}
+        {callStatus === "rejected" && (
+          <span className="text-sm sm:text-base">통화가 거절되었습니다</span>
+        )}
+        {callStatus === "ended" && (
+          <span className="text-sm sm:text-base">통화가 종료되었습니다</span>
+        )}
       </div>
 
-      {/* 디버그 정보 */}
-      <div className="bg-red-900 text-white p-2 text-xs max-h-20 overflow-y-auto flex-shrink-0">
+      {/* 디버그 정보 - 고정 높이 */}
+      <div className="bg-red-900 text-white p-2 text-xs flex-shrink-0 max-h-20 overflow-y-auto">
         {debugInfo.map((info, index) => (
           <div key={index}>{info}</div>
         ))}
       </div>
 
-      {/* 🔥 비디오 영역 - 컨트롤 버튼 공간을 고려한 높이 계산 */}
+      {/* 비디오 영역 - 남은 공간 모두 사용하되 버튼을 위한 공간 확보 */}
       <div
         className="flex-1 relative min-h-0"
-        style={{ paddingBottom: "88px" }}
+        style={{ maxHeight: "calc(100vh - 140px)" }}
       >
         {/* 원격 비디오 (큰 화면) */}
         <video
@@ -487,13 +497,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           style={{ transform: "scaleX(-1)" }}
         />
 
-        {/* 로컬 비디오 (작은 화면) */}
+        {/* 로컬 비디오 (작은 화면) - 반응형 크기 */}
         <video
           ref={localVideoRef}
           autoPlay
           playsInline
           muted
-          className="absolute top-4 right-4 w-32 h-24 bg-gray-800 rounded-lg object-cover border-2 border-white"
+          className="absolute top-2 right-2 w-24 h-18 sm:w-32 sm:h-24 bg-gray-800 rounded-lg object-cover border-2 border-white"
           style={{ transform: "scaleX(-1)" }}
         />
 
@@ -501,44 +511,44 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         {!remoteStream &&
           callStatus !== "ended" &&
           callStatus !== "rejected" && (
-            <div className="absolute inset-0 flex items-center justify-center text-white text-xl">
+            <div className="absolute inset-0 flex items-center justify-center text-white text-lg sm:text-xl">
               상대방을 기다리는 중...
             </div>
           )}
       </div>
 
-      {/* 🔥 고정된 컨트롤 버튼 - 화면 하단에 절대 위치로 고정 */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gray-800 p-4 md:p-6 shadow-lg z-10">
-        <div className="flex justify-center items-center gap-2 md:gap-4 max-w-lg mx-auto">
+      {/* 컨트롤 버튼 - 고정된 높이와 항상 표시 */}
+      <div className="bg-gray-800 flex-shrink-0 p-3 sm:p-4 min-h-[80px] flex items-center justify-center">
+        <div className="flex justify-center gap-2 sm:gap-4 w-full max-w-lg">
           <Button
             onClick={toggleMic}
             variant={isMicOn ? "default" : "destructive"}
-            className="px-3 py-2 text-xs md:px-6 md:py-2 md:text-sm flex-1 md:flex-none min-w-0"
+            className="flex-1 max-w-[120px] px-2 py-2 text-xs sm:text-sm sm:px-4"
           >
             <span className="hidden sm:inline">
               {isMicOn ? "마이크 켜짐" : "마이크 꺼짐"}
             </span>
-            <span className="sm:hidden">{isMicOn ? "🎤" : "🎤❌"}</span>
+            <span className="sm:hidden">{isMicOn ? "🎤" : "🔇"}</span>
           </Button>
 
           <Button
             onClick={toggleCamera}
             variant={isCameraOn ? "default" : "destructive"}
-            className="px-3 py-2 text-xs md:px-6 md:py-2 md:text-sm flex-1 md:flex-none min-w-0"
+            className="flex-1 max-w-[120px] px-2 py-2 text-xs sm:text-sm sm:px-4"
           >
             <span className="hidden sm:inline">
               {isCameraOn ? "카메라 켜짐" : "카메라 꺼짐"}
             </span>
-            <span className="sm:inline">{isCameraOn ? "📷" : "📷❌"}</span>
+            <span className="sm:hidden">{isCameraOn ? "📹" : "📷"}</span>
           </Button>
 
           <Button
             onClick={endCall}
             variant="destructive"
-            className="px-3 py-2 text-xs md:px-6 md:py-2 md:text-sm flex-1 md:flex-none min-w-0"
+            className="flex-1 max-w-[120px] px-2 py-2 text-xs sm:text-sm sm:px-4 bg-red-600 hover:bg-red-700"
           >
             <span className="hidden sm:inline">통화 종료</span>
-            <span className="sm:hidden">📞❌</span>
+            <span className="sm:hidden">📞</span>
           </Button>
         </div>
       </div>
