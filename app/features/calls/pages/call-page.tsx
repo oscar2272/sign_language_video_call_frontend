@@ -3,13 +3,8 @@ import { Button } from "~/common/components/ui/button";
 import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
-
-// MediaPipe 타입 정의
-declare global {
-  interface Window {
-    MediaPipe: any;
-  }
-}
+import { Hands } from "@mediapipe/hands";
+import { Camera } from "@mediapipe/camera_utils";
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   console.log("roomId:", params.id);
@@ -72,43 +67,24 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     ]);
   };
 
-  // MediaPipe 초기화
+  // MediaPipe 초기화 (NPM 패키지 방식)
   const initializeMediaPipe = async () => {
     try {
-      addDebugLog("Initializing MediaPipe...");
-
-      // MediaPipe CDN 로드
-      if (!window.MediaPipe) {
-        const script = document.createElement("script");
-        script.src =
-          "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js";
-        script.onload = () => {
-          const cameraScript = document.createElement("script");
-          cameraScript.src =
-            "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js";
-          cameraScript.onload = () => initHands();
-          document.head.appendChild(cameraScript);
-        };
-        document.head.appendChild(script);
-      } else {
-        initHands();
-      }
+      addDebugLog("Initializing MediaPipe (NPM package)...");
+      initHands();
     } catch (error) {
       addDebugLog(`MediaPipe initialization error: ${error}`);
     }
   };
 
-  // Hands 모델 초기화
+  // Hands 모델 초기화 (NPM 패키지 방식)
   const initHands = () => {
     try {
-      if (!window.MediaPipe?.Hands) {
-        addDebugLog("MediaPipe Hands not loaded");
-        return;
-      }
+      addDebugLog("Creating MediaPipe Hands instance...");
 
-      const hands = new window.MediaPipe.Hands({
+      const hands = new Hands({
         locateFile: (file: string) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+          return `/mediapipe/${file}`;
         },
       });
 
@@ -122,7 +98,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       hands.onResults(onHandsResults);
       handsRef.current = hands;
 
-      addDebugLog("MediaPipe Hands initialized");
+      addDebugLog("MediaPipe Hands initialized successfully");
     } catch (error) {
       addDebugLog(`Hands initialization error: ${error}`);
     }
