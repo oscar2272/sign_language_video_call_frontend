@@ -3,8 +3,13 @@ import { Button } from "~/common/components/ui/button";
 import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
-import { Hands } from "@mediapipe/hands";
-import { Camera } from "@mediapipe/camera_utils"; // src/types/mediapipe.d.ts
+
+// MediaPipe 타입 정의
+declare global {
+  interface Window {
+    MediaPipe: any;
+  }
+}
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   console.log("roomId:", params.id);
@@ -67,27 +72,77 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     ]);
   };
 
-  // MediaPipe 초기화 (NPM 패키지 방식)
+  // MediaPipe 스크립트 로드를 위한 Promise 기반 함수
+  const loadScript = (src: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // 이미 로드된 스크립트인지 확인
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+      document.head.appendChild(script);
+    });
+  };
+
+  // MediaPipe 초기화
   const initializeMediaPipe = async () => {
     try {
-      addDebugLog("Initializing MediaPipe (NPM package)...");
-      initHands();
+      addDebugLog("Loading MediaPipe scripts...");
+
+      // 순차적으로 스크립트 로드
+      await loadScript(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"
+      );
+      addDebugLog("Camera utils loaded");
+
+      await loadScript(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"
+      );
+      addDebugLog("Hands script loaded");
+
+      // 잠시 대기 후 MediaPipe 객체 확인
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      if (window.MediaPipe?.Hands) {
+        await initHands();
+      } else {
+        addDebugLog("MediaPipe.Hands still not available, retrying...");
+        // 재시도
+        setTimeout(async () => {
+          if (window.MediaPipe?.Hands) {
+            await initHands();
+          } else {
+            addDebugLog("MediaPipe failed to load after retry");
+          }
+        }, 1000);
+      }
     } catch (error) {
       addDebugLog(`MediaPipe initialization error: ${error}`);
     }
   };
 
-  // Hands 모델 초기화 (NPM 패키지 방식)
-  const initHands = () => {
+  // Hands 모델 초기화
+  const initHands = async () => {
     try {
-      addDebugLog("Creating MediaPipe Hands instance...");
+      addDebugLog("Initializing MediaPipe Hands...");
 
-      const hands = new Hands({
+      if (!window.MediaPipe?.Hands) {
+        addDebugLog("MediaPipe.Hands not available");
+        return;
+      }
+
+      const hands = new window.MediaPipe.Hands({
         locateFile: (file: string) => {
-          return `/mediapipe/${file}`;
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
         },
       });
 
+      addDebugLog("Setting Hands options...");
       hands.setOptions({
         maxNumHands: 2,
         modelComplexity: 1,
@@ -98,9 +153,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       hands.onResults(onHandsResults);
       handsRef.current = hands;
 
-      addDebugLog("MediaPipe Hands initialized successfully");
+      addDebugLog("MediaPipe Hands successfully initialized");
+      return hands;
     } catch (error) {
       addDebugLog(`Hands initialization error: ${error}`);
+      return null;
     }
   };
 
@@ -210,7 +267,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   };
 
   // AI 기능 토글
-  const toggleAI = () => {
+  const toggleAI = async () => {
     if (isAIEnabled) {
       // AI 끄기
       setIsAIEnabled(false);
@@ -226,14 +283,40 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       addDebugLog("AI feature disabled");
     } else {
       // AI 켜기
+      addDebugLog("Enabling AI feature...");
       setIsAIEnabled(true);
-      addDebugLog("AI feature enabled");
+
+      // MediaPipe 초기화 상태 확인
+      addDebugLog(
+        `Current MediaPipe state: ${window.MediaPipe ? "loaded" : "not loaded"}`
+      );
+      addDebugLog(
+        `Current Hands ref: ${handsRef.current ? "initialized" : "null"}`
+      );
 
       // MediaPipe 초기화 (아직 안 됐으면)
       if (!handsRef.current) {
-        initializeMediaPipe();
+        addDebugLog("Initializing MediaPipe...");
+        await initializeMediaPipe();
+
+        // 초기화 완료 대기
+        let retries = 0;
+        while (!handsRef.current && retries < 10) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          retries++;
+          addDebugLog(
+            `Waiting for MediaPipe initialization... retry ${retries}`
+          );
+        }
+
+        if (!handsRef.current) {
+          addDebugLog("MediaPipe initialization failed after retries");
+          setIsAIEnabled(false);
+          return;
+        }
       }
 
+      addDebugLog("MediaPipe ready, connecting AI WebSocket...");
       // AI WebSocket 연결
       connectAIWebSocket();
     }
