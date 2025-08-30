@@ -162,6 +162,29 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       addDebugLog("Initializing MediaPipe...");
       setAiStatus("initializing");
 
+      // WebGL 완전 비활성화 (전역 설정)
+      if (typeof window !== "undefined") {
+        // WebGL 컨텍스트 생성을 차단
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (
+          contextType,
+          ...args
+        ) {
+          if (
+            contextType === "webgl" ||
+            contextType === "webgl2" ||
+            contextType === "experimental-webgl"
+          ) {
+            console.log(
+              "Blocked WebGL context creation for MediaPipe CPU mode"
+            );
+            return null;
+          }
+          return originalGetContext.call(this, contextType, ...args);
+        };
+        addDebugLog("WebGL context creation blocked globally");
+      }
+
       // MediaPipe 스크립트 로드 확인
       if (!window.Hands) {
         throw new Error("MediaPipe not loaded");
@@ -174,17 +197,29 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         },
       });
 
-      addDebugLog("Setting MediaPipe options");
+      addDebugLog("Setting MediaPipe options with CPU enforcement");
       hands.setOptions({
         maxNumHands: 2,
-        modelComplexity: 0, // 가장 가벼운 모델
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-        runningMode: "IMAGE", // 비디오 스트림 대신 이미지 모드
-        enableSegmentation: false, // 세그멘테이션 비활성화
-        useCpuInference: true, // CPU 추론 강제
-        runtime: "cpu", // CPU 런타임 명시
+        modelComplexity: 0, // 최저 복잡도
+        minDetectionConfidence: 0.3, // 감도 낮춤
+        minTrackingConfidence: 0.3, // 감도 낮춤
+        selfieMode: false,
+        staticImageMode: true, // 정적 이미지 모드로 강제
+        useCpuInference: true,
+        runtime: "cpu",
+        enableSegmentation: false,
+        smoothLandmarks: false, // 부드러움 처리 비활성화 (GPU 사용할 수 있음)
+        smoothSegmentation: false,
       });
+
+      // MediaPipe 내부 GPU 사용 비활성화 시도
+      if (hands.initialize) {
+        await hands.initialize({
+          runtime: "cpu",
+          modelType: "lite", // 라이트 모델 사용
+        });
+        addDebugLog("MediaPipe initialized with CPU runtime");
+      }
 
       addDebugLog("Setting up MediaPipe onResults callback");
 
@@ -244,10 +279,81 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       handsRef.current = hands;
       addDebugLog("MediaPipe Hands instance stored in ref");
 
-      // MediaPipe Camera 대신 수동 프레임 캡처 방식 사용
-      // WebGL 문제를 피하기 위해 Canvas를 사용하여 프레임 추출
-      addDebugLog("Starting manual frame capture");
-      startManualFrameCapture();
+      handsRef.current = hands;
+      addDebugLog("MediaPipe Hands instance stored in ref");
+
+      // 더 안전한 Canvas 기반 프레임 전송 (ImageData 사용)
+      const sendFrameToMediaPipe = async (video: HTMLVideoElement) => {
+        try {
+          // 임시 Canvas 생성 (WebGL 없이)
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d", { willReadFrequently: true }); // 2D 컨텍스트 최적화
+
+          if (!ctx) {
+            throw new Error("Cannot get 2D context");
+          }
+
+          canvas.width = Math.min(video.videoWidth || 640, 640); // 최대 640으로 제한
+          canvas.height = Math.min(video.videoHeight || 480, 480); // 최대 480으로 제한
+
+          // 비디오 프레임을 Canvas에 그리기
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          // ImageData 추출 (WebGL 없이)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+          // MediaPipe에 ImageData 전송
+          await handsRef.current.send({ image: imageData });
+
+          return true;
+        } catch (error) {
+          console.error("Frame processing error:", error);
+          addDebugLog(`Frame processing error: ${error}`);
+          return false;
+        }
+      };
+
+      // 프레임 캡처 함수 수정
+      const startCpuFrameCapture = () => {
+        if (aiFrameIntervalRef.current) {
+          clearInterval(aiFrameIntervalRef.current);
+        }
+
+        addDebugLog("Starting CPU-only frame capture (10fps)");
+        let frameCount = 0;
+        let successCount = 0;
+
+        aiFrameIntervalRef.current = setInterval(async () => {
+          frameCount++;
+
+          if (
+            !handsRef.current ||
+            !localVideoRef.current ||
+            !isAIEnabledRef.current
+          ) {
+            return;
+          }
+
+          const video = localVideoRef.current;
+          if (video.readyState >= 2) {
+            const success = await sendFrameToMediaPipe(video);
+            if (success) {
+              successCount++;
+              if (frameCount === 1) {
+                addDebugLog("First frame sent successfully (CPU mode)");
+              }
+              if (frameCount % 30 === 0) {
+                addDebugLog(
+                  `CPU frame capture: ${successCount}/${frameCount} successful`
+                );
+              }
+            }
+          }
+        }, 1000 / 10); // 10fps로 더 낮춤 (CPU 부하 감소)
+      };
+
+      // 기존 startManualFrameCapture 대신 CPU 전용 버전 사용
+      startCpuFrameCapture();
 
       setAiStatus("active");
       addDebugLog("MediaPipe initialized successfully (CPU mode)");
@@ -269,86 +375,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       setAiStatus("off");
       setIsAIEnabled(false);
     }
-  };
-
-  // 수동 프레임 캡처 (WebGL 대신 Canvas 사용)
-  const startManualFrameCapture = () => {
-    if (aiFrameIntervalRef.current) {
-      clearInterval(aiFrameIntervalRef.current);
-    }
-
-    addDebugLog("Starting manual frame capture (15fps)");
-    let frameCount = 0;
-
-    aiFrameIntervalRef.current = setInterval(async () => {
-      frameCount++;
-
-      if (!handsRef.current) {
-        if (frameCount % 30 === 0)
-          addDebugLog("MediaPipe hands not initialized");
-        return;
-      }
-
-      if (!localVideoRef.current) {
-        if (frameCount % 30 === 0) addDebugLog("Local video ref not available");
-        return;
-      }
-
-      // state 대신 ref 사용으로 즉시 상태 확인
-      if (!isAIEnabledRef.current) {
-        if (frameCount % 30 === 0)
-          addDebugLog("AI disabled via ref, stopping capture");
-        return;
-      }
-
-      try {
-        const video = localVideoRef.current;
-
-        if (frameCount === 1) {
-          addDebugLog(
-            `Video dimensions: ${video.videoWidth}x${video.videoHeight}`
-          );
-          addDebugLog(`Video readyState: ${video.readyState}`);
-          addDebugLog(`AI enabled ref: ${isAIEnabledRef.current}`);
-        }
-
-        if (video.readyState >= 2) {
-          // 비디오가 로드된 상태
-          const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
-
-          canvas.width = video.videoWidth || 640;
-          canvas.height = video.videoHeight || 480;
-
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            if (frameCount === 1) {
-              addDebugLog("First frame captured, sending to MediaPipe");
-            }
-
-            // MediaPipe에 Canvas 전송
-            await handsRef.current.send({ image: canvas });
-
-            if (frameCount % 30 === 0) {
-              // 2초마다 상태 출력
-              addDebugLog(
-                `Frame capture working (${frameCount} frames processed)`
-              );
-            }
-          } else {
-            addDebugLog("Failed to get canvas context");
-          }
-        } else {
-          if (frameCount % 30 === 0) {
-            addDebugLog(`Video not ready (readyState: ${video.readyState})`);
-          }
-        }
-      } catch (error) {
-        console.error("Frame capture error:", error);
-        addDebugLog(`Frame capture error: ${error}`);
-      }
-    }, 1000 / 15); // 15fps
   };
 
   // 손 그리기 (디버그용)
