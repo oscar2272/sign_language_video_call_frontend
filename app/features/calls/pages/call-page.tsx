@@ -4,7 +4,7 @@ import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
 import { Hands } from "@mediapipe/hands";
-import { Camera } from "@mediapipe/camera_utils";
+import { Camera } from "@mediapipe/camera_utils"; // src/types/mediapipe.d.ts
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   console.log("roomId:", params.id);
