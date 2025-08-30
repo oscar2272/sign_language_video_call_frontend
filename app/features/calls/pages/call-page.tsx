@@ -3,7 +3,7 @@ import { Button } from "~/common/components/ui/button";
 import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
-
+// log 수정
 // MediaPipe 타입 정의
 declare global {
   interface Window {
