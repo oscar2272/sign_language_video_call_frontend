@@ -92,46 +92,63 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // AI WebSocket 연결
   const connectAIWebSocket = () => {
     if (aiWsRef.current?.readyState === WebSocket.OPEN) {
+      addDebugLog("AI WebSocket already connected");
       return;
     }
 
-    addDebugLog("Connecting to AI WebSocket...");
-    const aiWs = new WebSocket(`${WS_BASE_URL}/ai?role=client&room=${roomId}`);
+    const wsUrl = `${WS_BASE_URL}/ai?role=client&room=${roomId}`;
+    addDebugLog(`Connecting to AI WebSocket: ${wsUrl}`);
+    const aiWs = new WebSocket(wsUrl);
 
     aiWs.onopen = () => {
-      addDebugLog("AI WebSocket connected");
+      addDebugLog("AI WebSocket connected successfully");
+      console.log("AI WebSocket ready state:", aiWs.readyState);
     };
 
     aiWs.onmessage = (event) => {
+      addDebugLog("AI WebSocket message received");
+      console.log("Raw AI WebSocket message:", event.data);
+
       try {
         const data = JSON.parse(event.data);
-        console.log("AI WebSocket received:", data);
+        console.log("Parsed AI WebSocket message:", data);
+        addDebugLog(`Message type: ${data.type}`);
 
         if (data.type === "ai_result") {
           const aiResult: AIResult = data;
           setSubtitle(aiResult.text);
           setSubtitleScore(aiResult.score || 0);
-          addDebugLog(`AI Result: ${aiResult.text} (score: ${aiResult.score})`);
+          addDebugLog(
+            `AI Result: "${aiResult.text}" (score: ${aiResult.score})`
+          );
+          console.log("Setting subtitle:", aiResult.text);
 
-          // 자막을 3초 후에 자동으로 제거
+          // 자막을 5초 후에 자동으로 제거 (3초에서 5초로 연장)
           setTimeout(() => {
             setSubtitle("");
             setSubtitleScore(0);
-          }, 3000);
+            addDebugLog("Subtitle cleared");
+          }, 5000);
         } else if (data.type === "ai_toggle") {
           setRemoteAIEnabled(data.enabled);
           addDebugLog(`Remote AI ${data.enabled ? "enabled" : "disabled"}`);
+        } else {
+          addDebugLog(`Unknown message type: ${data.type}`);
         }
       } catch (error) {
         console.error("Error parsing AI WebSocket message:", error);
+        addDebugLog(`Message parse error: ${error}`);
       }
     };
 
-    aiWs.onclose = () => {
-      addDebugLog("AI WebSocket disconnected");
+    aiWs.onclose = (event) => {
+      addDebugLog(
+        `AI WebSocket closed (code: ${event.code}, reason: ${event.reason})`
+      );
     };
 
     aiWs.onerror = (error) => {
+      console.error("AI WebSocket error:", error);
       addDebugLog(`AI WebSocket error: ${error}`);
     };
 
@@ -149,12 +166,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         throw new Error("MediaPipe not loaded");
       }
 
+      addDebugLog("Creating MediaPipe Hands instance");
       const hands = new window.Hands({
         locateFile: (file: string) => {
           return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         },
       });
 
+      addDebugLog("Setting MediaPipe options");
       hands.setOptions({
         maxNumHands: 2,
         modelComplexity: 0, // 가장 가벼운 모델
@@ -166,11 +185,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         runtime: "cpu", // CPU 런타임 명시
       });
 
+      addDebugLog("Setting up MediaPipe onResults callback");
+
       hands.onResults((results: any) => {
+        addDebugLog("MediaPipe onResults called");
+        console.log("MediaPipe results:", results);
+
         if (
           results.multiHandLandmarks &&
           results.multiHandLandmarks.length > 0
         ) {
+          addDebugLog(`Detected ${results.multiHandLandmarks.length} hands`);
+
           const landmarks = results.multiHandLandmarks.map(
             (handLandmarks: any) =>
               handLandmarks.map((landmark: any) => ({
@@ -186,6 +212,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             timestamp: Date.now(),
           };
 
+          addDebugLog(`Sending hand data: ${landmarks.length} hands`);
+          console.log("Hand data to send:", handData);
+
           // AI 서버로 전송
           if (aiWsRef.current?.readyState === WebSocket.OPEN) {
             aiWsRef.current.send(JSON.stringify(handData));
@@ -194,23 +223,48 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
               landmarks.length,
               "hands detected"
             );
+            addDebugLog(`Hand landmarks sent successfully`);
+          } else {
+            addDebugLog("AI WebSocket not ready");
           }
 
           // 캔버스에 손 그리기 (디버그용)
           drawHands(results);
+        } else {
+          // 손이 감지되지 않을 때도 로그 출력 (너무 많이 나올 수 있으니 가끔만)
+          frameCountRef.current++;
+          if (frameCountRef.current % 30 === 0) {
+            // 2초마다 한 번씩
+            addDebugLog("No hands detected");
+          }
         }
       });
 
       handsRef.current = hands;
+      addDebugLog("MediaPipe Hands instance stored in ref");
 
       // MediaPipe Camera 대신 수동 프레임 캡처 방식 사용
       // WebGL 문제를 피하기 위해 Canvas를 사용하여 프레임 추출
+      addDebugLog("Starting manual frame capture");
       startManualFrameCapture();
 
       setAiStatus("active");
       addDebugLog("MediaPipe initialized successfully (CPU mode)");
+
+      // 비디오 상태 확인
+      if (localVideoRef.current) {
+        addDebugLog(
+          `Local video ready state: ${localVideoRef.current.readyState}`
+        );
+        addDebugLog(
+          `Local video size: ${localVideoRef.current.videoWidth}x${localVideoRef.current.videoHeight}`
+        );
+      } else {
+        addDebugLog("Local video ref not available!");
+      }
     } catch (error) {
       addDebugLog(`MediaPipe initialization failed: ${error}`);
+      console.error("MediaPipe error:", error);
       setAiStatus("off");
       setIsAIEnabled(false);
     }
@@ -222,14 +276,38 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       clearInterval(aiFrameIntervalRef.current);
     }
 
+    addDebugLog("Starting manual frame capture (15fps)");
+    let frameCount = 0;
+
     aiFrameIntervalRef.current = setInterval(async () => {
-      if (!handsRef.current || !localVideoRef.current || !isAIEnabled) {
+      frameCount++;
+
+      if (!handsRef.current) {
+        if (frameCount % 30 === 0)
+          addDebugLog("MediaPipe hands not initialized");
+        return;
+      }
+
+      if (!localVideoRef.current) {
+        if (frameCount % 30 === 0) addDebugLog("Local video ref not available");
+        return;
+      }
+
+      if (!isAIEnabled) {
+        if (frameCount % 30 === 0) addDebugLog("AI disabled, stopping capture");
         return;
       }
 
       try {
-        // Canvas를 사용하여 비디오 프레임 캡처
         const video = localVideoRef.current;
+
+        if (frameCount === 1) {
+          addDebugLog(
+            `Video dimensions: ${video.videoWidth}x${video.videoHeight}`
+          );
+          addDebugLog(`Video readyState: ${video.readyState}`);
+        }
+
         if (video.readyState >= 2) {
           // 비디오가 로드된 상태
           const canvas = document.createElement("canvas");
@@ -241,8 +319,25 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           if (ctx) {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // MediaPipe에 Canvas 전송 (ImageData 대신 Canvas 사용)
+            if (frameCount === 1) {
+              addDebugLog("First frame captured, sending to MediaPipe");
+            }
+
+            // MediaPipe에 Canvas 전송
             await handsRef.current.send({ image: canvas });
+
+            if (frameCount % 30 === 0) {
+              // 2초마다 상태 출력
+              addDebugLog(
+                `Frame capture working (${frameCount} frames processed)`
+              );
+            }
+          } else {
+            addDebugLog("Failed to get canvas context");
+          }
+        } else {
+          if (frameCount % 30 === 0) {
+            addDebugLog(`Video not ready (readyState: ${video.readyState})`);
           }
         }
       } catch (error) {
@@ -780,6 +875,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       addDebugLog("Remote stream set to video element");
     }
   }, [remoteStream]);
+
+  // 자막 상태 변경 감지
+  useEffect(() => {
+    if (subtitle) {
+      console.log("Subtitle updated:", subtitle, "Score:", subtitleScore);
+      addDebugLog(`Subtitle shown: "${subtitle}"`);
+    } else {
+      console.log("Subtitle cleared");
+    }
+  }, [subtitle, subtitleScore]);
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col h-screen">
