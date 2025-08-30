@@ -18,7 +18,6 @@ const WS_BASE_URL =
 declare global {
   interface Window {
     Hands: any;
-    Camera: any;
     drawingUtils: any;
   }
 }
@@ -77,7 +76,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // AI 기능 refs
   const aiWsRef = useRef<WebSocket | null>(null);
   const handsRef = useRef<any>(null);
-  const cameraRef = useRef<any>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameCountRef = useRef(0);
   const aiFrameIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -159,9 +157,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       hands.setOptions({
         maxNumHands: 2,
-        modelComplexity: 0, // CPU 모드
+        modelComplexity: 0, // 가장 가벼운 모델
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
+        runningMode: "IMAGE", // 비디오 스트림 대신 이미지 모드
+        enableSegmentation: false, // 세그멘테이션 비활성화
+        useCpuInference: true, // CPU 추론 강제
+        runtime: "cpu", // CPU 런타임 명시
       });
 
       hands.onResults((results: any) => {
@@ -169,10 +171,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           results.multiHandLandmarks &&
           results.multiHandLandmarks.length > 0
         ) {
-          // 15fps로 제한
-          frameCountRef.current++;
-          if (frameCountRef.current % 4 !== 0) return; // 60fps -> 15fps
-
           const landmarks = results.multiHandLandmarks.map(
             (handLandmarks: any) =>
               handLandmarks.map((landmark: any) => ({
@@ -205,29 +203,53 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       handsRef.current = hands;
 
-      // 카메라 설정
-      if (localVideoRef.current) {
-        const camera = new window.Camera(localVideoRef.current, {
-          onFrame: async () => {
-            if (handsRef.current && localVideoRef.current) {
-              await handsRef.current.send({ image: localVideoRef.current });
-            }
-          },
-          width: 640,
-          height: 480,
-        });
-
-        cameraRef.current = camera;
-        await camera.start();
-      }
+      // MediaPipe Camera 대신 수동 프레임 캡처 방식 사용
+      // WebGL 문제를 피하기 위해 Canvas를 사용하여 프레임 추출
+      startManualFrameCapture();
 
       setAiStatus("active");
-      addDebugLog("MediaPipe initialized successfully");
+      addDebugLog("MediaPipe initialized successfully (CPU mode)");
     } catch (error) {
       addDebugLog(`MediaPipe initialization failed: ${error}`);
       setAiStatus("off");
       setIsAIEnabled(false);
     }
+  };
+
+  // 수동 프레임 캡처 (WebGL 대신 Canvas 사용)
+  const startManualFrameCapture = () => {
+    if (aiFrameIntervalRef.current) {
+      clearInterval(aiFrameIntervalRef.current);
+    }
+
+    aiFrameIntervalRef.current = setInterval(async () => {
+      if (!handsRef.current || !localVideoRef.current || !isAIEnabled) {
+        return;
+      }
+
+      try {
+        // Canvas를 사용하여 비디오 프레임 캡처
+        const video = localVideoRef.current;
+        if (video.readyState >= 2) {
+          // 비디오가 로드된 상태
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 480;
+
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // MediaPipe에 Canvas 전송 (ImageData 대신 Canvas 사용)
+            await handsRef.current.send({ image: canvas });
+          }
+        }
+      } catch (error) {
+        console.error("Frame capture error:", error);
+        addDebugLog(`Frame capture error: ${error}`);
+      }
+    }, 1000 / 15); // 15fps
   };
 
   // 손 그리기 (디버그용)
@@ -293,12 +315,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       setAiStatus("off");
       setSubtitle("");
 
-      if (cameraRef.current) {
-        cameraRef.current.stop();
-      }
-
+      // 수동 프레임 캡처 중단
       if (aiFrameIntervalRef.current) {
         clearInterval(aiFrameIntervalRef.current);
+        aiFrameIntervalRef.current = null;
       }
     }
 
@@ -324,7 +344,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       }
 
       const scripts = [
-        "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js",
         "https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js",
         "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js",
         "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js",
@@ -696,6 +715,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     if (aiFrameIntervalRef.current) {
       clearInterval(aiFrameIntervalRef.current);
+      aiFrameIntervalRef.current = null;
     }
 
     if (localStreamRef.current) {
@@ -712,10 +732,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     if (aiWsRef.current) {
       aiWsRef.current.close();
-    }
-
-    if (cameraRef.current) {
-      cameraRef.current.stop();
     }
   };
 
