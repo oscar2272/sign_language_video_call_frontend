@@ -79,6 +79,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameCountRef = useRef(0);
   const aiFrameIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isAIEnabledRef = useRef(false); // AI 상태를 즉시 추적하기 위한 ref
 
   // 디버그 로그 함수
   const addDebugLog = (message: string) => {
@@ -293,8 +294,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         return;
       }
 
-      if (!isAIEnabled) {
-        if (frameCount % 30 === 0) addDebugLog("AI disabled, stopping capture");
+      // state 대신 ref 사용으로 즉시 상태 확인
+      if (!isAIEnabledRef.current) {
+        if (frameCount % 30 === 0)
+          addDebugLog("AI disabled via ref, stopping capture");
         return;
       }
 
@@ -306,6 +309,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             `Video dimensions: ${video.videoWidth}x${video.videoHeight}`
           );
           addDebugLog(`Video readyState: ${video.readyState}`);
+          addDebugLog(`AI enabled ref: ${isAIEnabledRef.current}`);
         }
 
         if (video.readyState >= 2) {
@@ -400,13 +404,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     const newAIState = !isAIEnabled;
     setIsAIEnabled(newAIState);
+    isAIEnabledRef.current = newAIState; // ref도 즉시 업데이트
+
+    addDebugLog(`Toggling AI to: ${newAIState}`);
 
     if (newAIState) {
       // AI 기능 켜기
+      addDebugLog("Enabling AI features...");
       connectAIWebSocket();
       await initializeMediaPipe();
     } else {
       // AI 기능 끄기
+      addDebugLog("Disabling AI features...");
       setAiStatus("off");
       setSubtitle("");
 
@@ -414,6 +423,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       if (aiFrameIntervalRef.current) {
         clearInterval(aiFrameIntervalRef.current);
         aiFrameIntervalRef.current = null;
+        addDebugLog("Frame capture stopped");
       }
     }
 
@@ -425,6 +435,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           enabled: newAIState,
         })
       );
+      addDebugLog(`Sent AI toggle to remote: ${newAIState}`);
     }
 
     addDebugLog(`AI ${newAIState ? "enabled" : "disabled"}`);
@@ -804,6 +815,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const cleanup = () => {
     addDebugLog("Cleaning up resources...");
 
+    // AI 상태 ref 초기화
+    isAIEnabledRef.current = false;
+
     if (connectionTimeRef.current) {
       clearInterval(connectionTimeRef.current);
     }
@@ -885,6 +899,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       console.log("Subtitle cleared");
     }
   }, [subtitle, subtitleScore]);
+
+  // AI 상태 ref와 state 동기화
+  useEffect(() => {
+    isAIEnabledRef.current = isAIEnabled;
+    addDebugLog(`AI state synced: ${isAIEnabled}`);
+  }, [isAIEnabled]);
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col h-screen">
