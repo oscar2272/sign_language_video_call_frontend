@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button } from "~/common/components/ui/button";
 import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
-// log 수정
+
 // MediaPipe 타입 정의
 declare global {
   interface Window {
@@ -22,28 +22,18 @@ const CALL_API_URL = `${BASE_URL}/api/calls`;
 const WS_BASE_URL =
   import.meta.env.VITE_WS_BASE_URL ?? `ws://${window.location.hostname}:8000`;
 
-// AI WebSocket URL
-const AI_WS_URL = `${WS_BASE_URL}/ai`;
-
 interface HandLandmark {
   x: number;
   y: number;
 }
 
 interface AIResult {
-  type: "ai_result";
+  type: string;
   room_id: string;
-  frame_id: number;
+  frame_id?: number;
   text: string;
-  score: number;
-  timestamp: number;
-}
-
-interface Subtitle {
-  id: number;
-  text: string;
-  timestamp: number;
-  score: number;
+  score?: number;
+  timestamp?: number;
 }
 
 export default function CallPage({ loaderData }: Route.ComponentProps) {
@@ -54,7 +44,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     token: string;
   }>();
 
-  // 기존 상태들
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [callStatus, setCallStatus] = useState<
@@ -65,29 +54,26 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [connectionTime, setConnectionTime] = useState(0);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
-  // AI 관련 상태들
+  // AI 기능 관련 state
   const [isAIEnabled, setIsAIEnabled] = useState(false);
-  const [isAILoading, setIsAILoading] = useState(false);
-  const [canToggleAI, setCanToggleAI] = useState(true); // 다른 사용자가 AI를 켰는지 여부
-  const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
-  const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
+  const [aiSubtitle, setAiSubtitle] = useState<string>("");
+  const [isAIBlocked, setIsAIBlocked] = useState(false); // 상대방이 AI를 켰을 때
+  const [mediaPipeReady, setMediaPipeReady] = useState(false);
 
-  // Refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const aiWsRef = useRef<WebSocket | null>(null);
+  const aiWsRef = useRef<WebSocket | null>(null); // AI WebSocket
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const connectionTimeRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
 
-  // MediaPipe 관련 Refs
+  // MediaPipe 관련 refs
   const handsRef = useRef<any>(null);
-  const cameraRef = useRef<any>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frameCountRef = useRef(0);
-  const lastSentTimeRef = useRef(0);
+  const aiIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const frameIdRef = useRef<number>(0);
 
   // 디버그 로그 함수
   const addDebugLog = (message: string) => {
@@ -99,262 +85,216 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   };
 
   // MediaPipe 초기화
-  const initializeMediaPipe = useCallback(() => {
-    if (typeof window === "undefined" || !window.Hands) {
-      addDebugLog("MediaPipe not loaded");
+  const initializeMediaPipe = async () => {
+    try {
+      addDebugLog("Initializing MediaPipe...");
+
+      // MediaPipe 스크립트 로드 확인
+      if (!window.Hands) {
+        addDebugLog("Loading MediaPipe scripts...");
+        await loadMediaPipeScripts();
+      }
+
+      const hands = new window.Hands({
+        locateFile: (file: string) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      hands.onResults(onHandsResults);
+      handsRef.current = hands;
+      setMediaPipeReady(true);
+      addDebugLog("MediaPipe initialized successfully");
+    } catch (error) {
+      addDebugLog(`MediaPipe initialization error: ${error}`);
+    }
+  };
+
+  // MediaPipe 스크립트 로드
+  const loadMediaPipeScripts = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (window.Hands) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js";
+      script.onload = () => {
+        const cameraScript = document.createElement("script");
+        cameraScript.src =
+          "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
+        cameraScript.onload = () => resolve();
+        cameraScript.onerror = () =>
+          reject(new Error("Failed to load camera utils"));
+        document.head.appendChild(cameraScript);
+      };
+      script.onerror = () => reject(new Error("Failed to load MediaPipe"));
+      document.head.appendChild(script);
+    });
+  };
+
+  // 손 좌표 처리 결과
+  const onHandsResults = (results: any) => {
+    if (
+      !isAIEnabled ||
+      !aiWsRef.current ||
+      aiWsRef.current.readyState !== WebSocket.OPEN
+    ) {
       return;
     }
 
-    addDebugLog("Initializing MediaPipe Hands");
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks: HandLandmark[][] = results.multiHandLandmarks.map(
+        (handLandmarks: any[]) =>
+          handLandmarks.map((landmark: any) => ({
+            x: landmark.x,
+            y: landmark.y,
+          }))
+      );
 
-    const hands = new window.Hands({
-      locateFile: (file: string) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-      },
-    });
+      const data = {
+        type: "hand_landmarks",
+        room_id: roomId,
+        landmarks: landmarks,
+        timestamp: Date.now(),
+      };
 
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-
-    hands.onResults(onHandsResults);
-    handsRef.current = hands;
-
-    if (localVideoRef.current) {
-      const camera = new window.Camera(localVideoRef.current, {
-        onFrame: async () => {
-          if (handsRef.current && isAIEnabled) {
-            await handsRef.current.send({ image: localVideoRef.current });
-          }
-        },
-        width: 1280,
-        height: 720,
-      });
-      cameraRef.current = camera;
+      console.log(`[AI] Sending hand landmarks:`, data);
+      aiWsRef.current.send(JSON.stringify(data));
+      frameIdRef.current++;
     }
-
-    addDebugLog("MediaPipe Hands initialized");
-  }, [isAIEnabled]);
-
-  // 손 좌표 결과 처리
-  const onHandsResults = useCallback(
-    (results: any) => {
-      if (
-        !isAIEnabled ||
-        !aiWsRef.current ||
-        aiWsRef.current.readyState !== WebSocket.OPEN
-      ) {
-        return;
-      }
-
-      frameCountRef.current++;
-      const now = Date.now();
-
-      // 15fps로 제한 (66.67ms마다 전송)
-      if (now - lastSentTimeRef.current < 67) {
-        return;
-      }
-
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks: HandLandmark[][] = results.multiHandLandmarks.map(
-          (handLandmarks: any[]) =>
-            handLandmarks.map((landmark: any) => ({
-              x: landmark.x,
-              y: landmark.y,
-            }))
-        );
-
-        const data = {
-          type: "hand_landmarks",
-          room_id: roomId,
-          landmarks: landmarks,
-          timestamp: now,
-        };
-
-        aiWsRef.current.send(JSON.stringify(data));
-        lastSentTimeRef.current = now;
-
-        addDebugLog(
-          `Sent landmarks: ${landmarks.length} hands, ${landmarks[0]?.length || 0} points each`
-        );
-      }
-    },
-    [isAIEnabled, roomId]
-  );
+  };
 
   // AI WebSocket 연결
-  const connectAIWebSocket = useCallback(() => {
-    if (aiWsRef.current?.readyState === WebSocket.OPEN) {
-      return;
+  const connectAIWebSocket = () => {
+    if (aiWsRef.current) {
+      aiWsRef.current.close();
     }
 
     addDebugLog("Connecting to AI WebSocket...");
-
-    const aiWs = new WebSocket(
-      `${AI_WS_URL}?role=client&room=${roomId}&token=${token}`
-    );
+    const aiWs = new WebSocket(`${WS_BASE_URL}/ai?role=client&room=${roomId}`);
 
     aiWs.onopen = () => {
       addDebugLog("AI WebSocket connected");
-      setIsAILoading(false);
     };
 
     aiWs.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log(`[AI] Received message:`, data);
 
-        if (data.type === "ai_result") {
-          const result: AIResult = data;
-          addDebugLog(`AI Result: ${result.text} (score: ${result.score})`);
+        switch (data.type) {
+          case "ai_result":
+            const aiResult = data as AIResult;
+            setAiSubtitle(aiResult.text);
+            addDebugLog(
+              `AI result: ${aiResult.text} (score: ${aiResult.score})`
+            );
 
-          // 자막 추가
-          const newSubtitle: Subtitle = {
-            id: result.frame_id,
-            text: result.text,
-            timestamp: result.timestamp,
-            score: result.score,
-          };
+            // 3초 후 자막 사라지게 하기
+            setTimeout(() => {
+              setAiSubtitle("");
+            }, 3000);
+            break;
 
-          setSubtitles((prev) => [...prev.slice(-4), newSubtitle]); // 최근 5개만 유지
-          setCurrentSubtitle(result.text);
-
-          // 3초 후 현재 자막 제거
-          setTimeout(() => {
-            setCurrentSubtitle((prev) => (prev === result.text ? "" : prev));
-          }, 3000);
-        } else if (data.type === "ai_status") {
-          // 다른 사용자의 AI 상태 변경
-          if (data.user_id !== user.id) {
-            setCanToggleAI(!data.enabled);
-            if (data.enabled && isAIEnabled) {
-              // 다른 사용자가 AI를 켰으면 내 AI는 끔
-              handleAIToggle(false);
+          case "ai_status":
+            // 상대방의 AI 상태 변경
+            if (data.user_id !== user.id) {
+              setIsAIBlocked(data.enabled);
+              addDebugLog(
+                `Remote user AI status: ${data.enabled ? "enabled" : "disabled"}`
+              );
             }
-          }
+            break;
         }
       } catch (error) {
-        addDebugLog(`AI WebSocket message error: ${error}`);
+        addDebugLog(`AI WebSocket message parsing error: ${error}`);
       }
     };
 
     aiWs.onclose = () => {
       addDebugLog("AI WebSocket disconnected");
-      setIsAILoading(false);
     };
 
     aiWs.onerror = (error) => {
       addDebugLog(`AI WebSocket error: ${error}`);
-      setIsAILoading(false);
     };
 
     aiWsRef.current = aiWs;
-  }, [roomId, token, user.id, isAIEnabled]);
+  };
 
-  // AI 토글 핸들러
-  const handleAIToggle = useCallback(
-    (enabled?: boolean) => {
-      const newState = enabled !== undefined ? enabled : !isAIEnabled;
+  // AI 기능 토글
+  const toggleAI = () => {
+    if (isAIBlocked) {
+      alert("상대방이 이미 AI 기능을 사용 중입니다.");
+      return;
+    }
 
-      if (!canToggleAI && newState) {
-        addDebugLog("Cannot enable AI - another user has it enabled");
-        return;
-      }
+    const newAIEnabled = !isAIEnabled;
+    setIsAIEnabled(newAIEnabled);
 
-      setIsAIEnabled(newState);
-      setIsAILoading(newState);
+    // AI 상태를 상대방에게 알리기
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "ai_status",
+          user_id: user.id,
+          enabled: newAIEnabled,
+        })
+      );
+    }
 
-      if (newState) {
-        // AI 켜기
-        connectAIWebSocket();
+    if (newAIEnabled) {
+      startAIProcessing();
+      addDebugLog("AI 기능 활성화");
+    } else {
+      stopAIProcessing();
+      setAiSubtitle("");
+      addDebugLog("AI 기능 비활성화");
+    }
+  };
 
-        // MediaPipe 시작
-        if (cameraRef.current) {
-          cameraRef.current.start();
-        }
+  // AI 처리 시작 (15fps)
+  const startAIProcessing = () => {
+    if (!mediaPipeReady || !localVideoRef.current || !canvasRef.current) {
+      addDebugLog("MediaPipe or video not ready for AI processing");
+      return;
+    }
 
-        // 다른 사용자에게 AI 상태 알림
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "ai_status",
-              user_id: user.id,
-              enabled: true,
-            })
-          );
-        }
-      } else {
-        // AI 끄기
-        if (aiWsRef.current) {
-          aiWsRef.current.close();
-          aiWsRef.current = null;
-        }
+    // 15fps = 1000/15 ≈ 67ms 간격
+    aiIntervalRef.current = setInterval(() => {
+      if (handsRef.current && localVideoRef.current && canvasRef.current) {
+        const canvas = canvasRef.current;
+        const video = localVideoRef.current;
 
-        if (cameraRef.current) {
-          cameraRef.current.stop();
-        }
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
 
-        setSubtitles([]);
-        setCurrentSubtitle("");
-        setIsAILoading(false);
-
-        // 다른 사용자에게 AI 상태 알림
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "ai_status",
-              user_id: user.id,
-              enabled: false,
-            })
-          );
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          handsRef.current.send({ image: canvas });
         }
       }
+    }, 1000 / 15);
+  };
 
-      addDebugLog(`AI ${newState ? "enabled" : "disabled"}`);
-    },
-    [isAIEnabled, canToggleAI, connectAIWebSocket, user.id]
-  );
+  // AI 처리 중지
+  const stopAIProcessing = () => {
+    if (aiIntervalRef.current) {
+      clearInterval(aiIntervalRef.current);
+      aiIntervalRef.current = null;
+    }
+  };
 
-  // MediaPipe 스크립트 로드
-  useEffect(() => {
-    const loadMediaPipe = () => {
-      if (window.Hands && window.Camera) {
-        initializeMediaPipe();
-        return;
-      }
-
-      // MediaPipe 스크립트 로드
-      const script1 = document.createElement("script");
-      script1.src =
-        "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
-      script1.onload = () => {
-        const script2 = document.createElement("script");
-        script2.src =
-          "https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js";
-        script2.onload = () => {
-          const script3 = document.createElement("script");
-          script3.src =
-            "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js";
-          script3.onload = () => {
-            const script4 = document.createElement("script");
-            script4.src =
-              "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js";
-            script4.onload = initializeMediaPipe;
-            document.head.appendChild(script4);
-          };
-          document.head.appendChild(script3);
-        };
-        document.head.appendChild(script2);
-      };
-      document.head.appendChild(script1);
-    };
-
-    loadMediaPipe();
-  }, [initializeMediaPipe]);
-
-  // WebRTC 설정 (기존 코드)
+  // WebRTC 설정
   const createPeerConnection = () => {
     addDebugLog("Creating peer connection...");
 
@@ -408,7 +348,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return pc;
   };
 
-  // 미디어 스트림 초기화 (기존 코드)
+  // 수정된 미디어 스트림 초기화
   const initializeMedia = async (): Promise<MediaStream | null> => {
     try {
       addDebugLog("Requesting media access...");
@@ -433,7 +373,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // WebSocket 연결 (기존 코드에 AI 상태 처리 추가)
+  // WebSocket 연결 수정 - AI 상태 메시지 처리 추가
   const connectWebSocket = (stream: MediaStream) => {
     addDebugLog("Connecting to WebSocket...");
     const ws = new WebSocket(
@@ -472,16 +412,19 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           break;
 
         case "ai_status":
-          // 다른 사용자의 AI 상태 변경 처리
+          // 상대방의 AI 상태 변경
           if (data.user_id !== user.id) {
-            setCanToggleAI(!data.enabled);
+            setIsAIBlocked(data.enabled);
             addDebugLog(
-              `Other user AI status: ${data.enabled ? "enabled" : "disabled"}`
+              `Remote user AI status: ${data.enabled ? "enabled" : "disabled"}`
             );
-
             if (data.enabled && isAIEnabled) {
-              // 다른 사용자가 AI를 켰으면 내 AI는 끔
-              handleAIToggle(false);
+              // 내가 AI를 켰는데 상대방도 켰다면 내 AI 끄기
+              setIsAIEnabled(false);
+              stopAIProcessing();
+              alert(
+                "상대방이 AI 기능을 활성화했습니다. 내 AI 기능이 비활성화됩니다."
+              );
             }
           }
           break;
@@ -505,7 +448,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     return ws;
   };
 
-  // 나머지 기존 함수들... (createOffer, handleOffer, handleAnswer, handleIceCandidate 등)
+  // 나머지 WebRTC 관련 함수들은 동일...
   const createOffer = async (stream: MediaStream) => {
     addDebugLog("Creating offer...");
 
@@ -703,6 +646,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       clearInterval(connectionTimeRef.current);
     }
 
+    if (aiIntervalRef.current) {
+      clearInterval(aiIntervalRef.current);
+    }
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
@@ -717,10 +664,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     if (aiWsRef.current) {
       aiWsRef.current.close();
-    }
-
-    if (cameraRef.current) {
-      cameraRef.current.stop();
     }
   };
 
@@ -740,11 +683,18 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     addDebugLog("Initializing CallPage");
 
     const init = async () => {
+      // 1. MediaPipe 초기화
+      await initializeMediaPipe();
+
+      // 2. 미디어 스트림 가져오기
       const stream = await initializeMedia();
       if (!stream) return;
 
-      addDebugLog("Media stream ready, connecting WebSocket");
+      addDebugLog("Media stream ready, connecting WebSockets");
+
+      // 3. WebSocket 연결들
       wsRef.current = connectWebSocket(stream);
+      connectAIWebSocket();
     };
 
     init();
@@ -761,6 +711,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col h-screen">
+      {/* 숨겨진 캔버스 - MediaPipe 처리용 */}
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+
       {/* 상태 표시 */}
       <div className="bg-gray-800 text-white p-3 text-center flex-shrink-0 min-h-[60px] flex items-center justify-center">
         {callStatus === "calling" && (
@@ -770,12 +723,21 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           <span className="text-sm sm:text-base">연결 중...</span>
         )}
         {callStatus === "connected" && (
-          <span className="text-sm sm:text-base">
-            통화 중 - {formatTime(connectionTime)}
+          <div className="flex items-center gap-4">
+            <span className="text-sm sm:text-base">
+              통화 중 - {formatTime(connectionTime)}
+            </span>
             {isAIEnabled && (
-              <span className="ml-2 text-green-400">🤖 AI 번역 ON</span>
+              <span className="text-xs bg-blue-600 px-2 py-1 rounded">
+                AI 활성화
+              </span>
             )}
-          </span>
+            {isAIBlocked && (
+              <span className="text-xs bg-red-600 px-2 py-1 rounded">
+                상대방 AI 사용중
+              </span>
+            )}
+          </div>
         )}
         {callStatus === "rejected" && (
           <span className="text-sm sm:text-base">통화가 거절되었습니다</span>
@@ -816,29 +778,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           style={{ transform: "scaleX(-1)" }}
         />
 
-        {/* 자막 표시 영역 */}
-        {currentSubtitle && (
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 text-white px-4 py-2 rounded-lg text-lg font-semibold max-w-xs sm:max-w-md text-center">
-            {currentSubtitle}
-          </div>
-        )}
-
-        {/* 자막 히스토리 */}
-        {subtitles.length > 0 && !currentSubtitle && (
-          <div className="absolute bottom-4 left-4 bg-black bg-opacity-50 text-white p-2 rounded text-sm max-w-xs max-h-32 overflow-y-auto">
-            <div className="text-xs text-gray-300 mb-1">최근 자막:</div>
-            {subtitles.slice(-3).map((subtitle) => (
-              <div key={subtitle.id} className="mb-1">
-                <span className="text-xs text-gray-400">
-                  {new Date(subtitle.timestamp).toLocaleTimeString()}
-                </span>
-                <br />
-                <span>{subtitle.text}</span>
-                <span className="text-xs text-gray-400 ml-2">
-                  ({Math.round(subtitle.score * 100)}%)
-                </span>
-              </div>
-            ))}
+        {/* AI 자막 표시 */}
+        {aiSubtitle && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-75 text-white px-4 py-2 rounded-lg max-w-xs sm:max-w-md text-center">
+            <span className="text-sm sm:text-base">{aiSubtitle}</span>
           </div>
         )}
 
@@ -850,18 +793,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
               상대방을 기다리는 중...
             </div>
           )}
-
-        {/* MediaPipe 처리용 숨겨진 캔버스 */}
-        <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      {/* 컨트롤 버튼 */}
-      <div className="bg-gray-800 flex-shrink-0 p-3 sm:p-4 min-h-[120px] flex items-center justify-center">
-        <div className="flex justify-center gap-2 sm:gap-3 w-full max-w-2xl flex-wrap">
+      {/* 컨트롤 버튼 - AI 버튼 추가 */}
+      <div className="bg-gray-800 flex-shrink-0 p-3 sm:p-4 min-h-[120px] flex flex-col items-center justify-center gap-2">
+        <div className="flex justify-center gap-2 sm:gap-4 w-full max-w-lg">
           <Button
             onClick={toggleMic}
             variant={isMicOn ? "default" : "destructive"}
-            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-3"
+            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-4"
           >
             <span className="hidden sm:inline">
               {isMicOn ? "마이크 켜짐" : "마이크 꺼짐"}
@@ -872,7 +812,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           <Button
             onClick={toggleCamera}
             variant={isCameraOn ? "default" : "destructive"}
-            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-3"
+            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-4"
           >
             <span className="hidden sm:inline">
               {isCameraOn ? "카메라 켜짐" : "카메라 꺼짐"}
@@ -881,39 +821,32 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           </Button>
 
           <Button
-            onClick={() => handleAIToggle()}
-            variant={isAIEnabled ? "default" : "outline"}
-            disabled={(!canToggleAI && !isAIEnabled) || isAILoading}
-            className="flex-1 max-w-[120px] px-2 py-2 text-xs sm:text-sm sm:px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600"
-          >
-            {isAILoading ? (
-              <span className="flex items-center gap-1">
-                <span className="animate-spin">⚙️</span>
-                <span className="hidden sm:inline">연결중...</span>
-              </span>
-            ) : (
-              <>
-                <span className="hidden sm:inline">
-                  {isAIEnabled
-                    ? "AI 번역 켜짐"
-                    : canToggleAI
-                      ? "AI 번역 켜기"
-                      : "AI 사용중"}
-                </span>
-                <span className="sm:hidden">
-                  {isAIEnabled ? "🤖✅" : canToggleAI ? "🤖" : "🤖❌"}
-                </span>
-              </>
-            )}
-          </Button>
-
-          <Button
             onClick={endCall}
             variant="destructive"
-            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-3 bg-red-600 hover:bg-red-700"
+            className="flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-4 bg-red-600 hover:bg-red-700"
           >
             <span className="hidden sm:inline">통화 종료</span>
             <span className="sm:hidden">📞</span>
+          </Button>
+        </div>
+
+        {/* AI 기능 버튼 */}
+        <div className="flex justify-center w-full max-w-lg">
+          <Button
+            onClick={toggleAI}
+            disabled={isAIBlocked || !mediaPipeReady}
+            variant={isAIEnabled ? "default" : "outline"}
+            className="px-4 py-2 text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="flex items-center gap-2">
+              🤖
+              <span className="hidden sm:inline">
+                {isAIEnabled ? "AI 끄기" : "AI 켜기"}
+                {isAIBlocked ? " (상대방 사용중)" : ""}
+                {!mediaPipeReady ? " (로딩중...)" : ""}
+              </span>
+              <span className="sm:hidden">{isAIEnabled ? "OFF" : "ON"}</span>
+            </span>
           </Button>
         </div>
       </div>
