@@ -85,7 +85,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   };
 
   // MediaPipe 초기화
-  const initializeMediaPipe = () => {
+  const initializeMediaPipe = (): any | null => {
     if (!window.Hands) {
       addDebugLog("MediaPipe Hands not loaded");
       return null;
@@ -133,8 +133,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   };
 
   // AI WebSocket 연결
-  const connectAIWebSocket = () => {
-    if (!roomId) return;
+  const connectAIWebSocket = (): WebSocket | null => {
+    if (!roomId) {
+      addDebugLog("No room ID available for AI WebSocket");
+      return null;
+    }
 
     addDebugLog("Connecting to AI WebSocket...");
     const aiWs = new WebSocket(`${AI_WS_URL}${roomId}`);
