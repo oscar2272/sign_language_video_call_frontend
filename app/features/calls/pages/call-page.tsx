@@ -4,12 +4,12 @@ import { useOutletContext, useNavigate } from "react-router";
 import type { UserProfile } from "~/features/profiles/type";
 import type { Route } from "./+types/call-page";
 
-// MediaPipe 임포트 (npm install 필요)
-// npm i @mediapipe/camera_utils @mediapipe/holistic @mediapipe/drawing_utils
-import { Camera } from "@mediapipe/camera_utils";
-import { Holistic, HAND_CONNECTIONS } from "@mediapipe/holistic";
-import type { Results } from "@mediapipe/holistic";
-import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
+// MediaPipe 타입 정의
+declare global {
+  interface Window {
+    MediaPipe: any;
+  }
+}
 
 export const loader = async ({ params }: Route.LoaderArgs) => {
   console.log("roomId:", params.id);
@@ -43,11 +43,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // AI 기능 상태들
   const [isAIEnabled, setIsAIEnabled] = useState(false);
-  const [isAIBlocked, setIsAIBlocked] = useState(false); // 상대방이 AI를 켰을 때
   const [aiStatus, setAiStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
   const [handLandmarks, setHandLandmarks] = useState<any[]>([]);
+  const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
+  const [remoteAIEnabled, setRemoteAIEnabled] = useState(false);
 
   // Refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -60,46 +61,150 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const localStreamRef = useRef<MediaStream | null>(null);
 
   // MediaPipe refs
-  const holisticRef = useRef<Holistic | null>(null);
-  const cameraRef = useRef<Camera | null>(null);
+  const holisticRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frameIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 디버그 로그 함수
   const addDebugLog = (message: string) => {
     console.log(`[CallPage] ${message}`);
     setDebugInfo((prev) => [
-      ...prev.slice(-8),
+      ...prev.slice(-10), // 더 많은 로그 표시
       `${new Date().toLocaleTimeString()}: ${message}`,
     ]);
   };
 
-  // MediaPipe onResults 콜백
-  const onResults = (results: Results) => {
-    if (!canvasRef.current) return;
+  // MediaPipe 스크립트 로딩 (순차적으로)
+  const loadMediaPipeScripts = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const scripts = [
+        "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js",
+        "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1640029074/drawing_utils.js",
+        "https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/holistic.js",
+      ];
+
+      let loadedCount = 0;
+
+      const loadScript = (src: string) => {
+        return new Promise<void>((resolve, reject) => {
+          if (document.querySelector(`script[src="${src}"]`)) {
+            resolve();
+            return;
+          }
+
+          const script = document.createElement("script");
+          script.src = src;
+          script.onload = () => {
+            addDebugLog(`Loaded: ${src.split("/").pop()}`);
+            resolve();
+          };
+          script.onerror = () => {
+            addDebugLog(`Failed to load: ${src.split("/").pop()}`);
+            reject(new Error(`Failed to load ${src}`));
+          };
+          document.head.appendChild(script);
+        });
+      };
+
+      // 순차적으로 스크립트 로드
+      const loadSequentially = async () => {
+        try {
+          for (const src of scripts) {
+            await loadScript(src);
+            loadedCount++;
+          }
+
+          // 모든 스크립트 로드 완료 후 약간 대기
+          setTimeout(() => {
+            if (window.MediaPipe?.Holistic && window.MediaPipe?.Camera) {
+              addDebugLog("All MediaPipe scripts loaded successfully");
+              setMediaPipeLoaded(true);
+              resolve();
+            } else {
+              addDebugLog("MediaPipe objects not found after loading");
+              reject(new Error("MediaPipe objects not available"));
+            }
+          }, 500);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      loadSequentially();
+    });
+  };
+
+  // MediaPipe Holistic 초기화
+  const initializeHolistic = async () => {
+    try {
+      if (!window.MediaPipe?.Holistic) {
+        addDebugLog("MediaPipe.Holistic not available");
+        return;
+      }
+
+      addDebugLog("Initializing Holistic...");
+
+      const holistic = new window.MediaPipe.Holistic({
+        locateFile: (file: string) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${file}`;
+        },
+      });
+
+      holistic.setOptions({
+        selfieMode: true,
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false, // 손만 필요하므로 세그멘테이션 끄기
+        smoothSegmentation: false,
+        refineFaceLandmarks: false, // 얼굴도 끄기
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5,
+      });
+
+      holistic.onResults(onHolisticResults);
+      holisticRef.current = holistic;
+
+      addDebugLog("Holistic initialized successfully");
+      return holistic;
+    } catch (error) {
+      addDebugLog(`Holistic initialization error: ${error}`);
+      return null;
+    }
+  };
+
+  // 손 인식 결과 처리
+  const onHolisticResults = (results: any) => {
+    // 캔버스에 그리기
+    drawResults(results);
 
     // 손 좌표 추출
     const landmarks: any[] = [];
 
     if (results.leftHandLandmarks) {
-      const leftHand = results.leftHandLandmarks.map((landmark) => ({
-        x: landmark.x,
-        y: landmark.y,
-      }));
+      const leftHand: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i < results.leftHandLandmarks.length; i++) {
+        leftHand.push({
+          x: results.leftHandLandmarks[i].x,
+          y: results.leftHandLandmarks[i].y,
+        });
+      }
       landmarks.push(leftHand);
     }
 
     if (results.rightHandLandmarks) {
-      const rightHand = results.rightHandLandmarks.map((landmark) => ({
-        x: landmark.x,
-        y: landmark.y,
-      }));
+      const rightHand: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i < results.rightHandLandmarks.length; i++) {
+        rightHand.push({
+          x: results.rightHandLandmarks[i].x,
+          y: results.rightHandLandmarks[i].y,
+        });
+      }
       landmarks.push(rightHand);
     }
 
     setHandLandmarks(landmarks);
 
-    // AI가 활성화되어 있고 손이 인식되면 WebSocket으로 전송
+    // AI WebSocket으로 전송
     if (
       isAIEnabled &&
       aiWsRef.current?.readyState === WebSocket.OPEN &&
@@ -115,118 +220,109 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       try {
         aiWsRef.current.send(JSON.stringify(message));
         addDebugLog(
-          `Sent landmarks: ${landmarks.length} hands, ${landmarks.reduce((sum, hand) => sum + hand.length, 0)} points`
+          `✅ Sent ${landmarks.length} hands to AI (${landmarks.reduce((sum, hand) => sum + hand.length, 0)} points)`
         );
       } catch (error) {
-        addDebugLog(`Failed to send landmarks: ${error}`);
+        addDebugLog(`❌ Failed to send landmarks: ${error}`);
       }
-    }
-
-    // Canvas에 손 그리기 (선택사항 - 디버그용)
-    if (isAIEnabled) {
-      drawHandsOnCanvas(results);
     }
   };
 
-  // Canvas에 손 그리기 (디버그용)
-  const drawHandsOnCanvas = (results: Results) => {
+  // 캔버스에 결과 그리기
+  const drawResults = (results: any) => {
     if (!canvasRef.current || !localVideoRef.current) return;
 
-    const canvasElement = canvasRef.current;
-    const canvasCtx = canvasElement.getContext("2d");
+    const videoWidth = localVideoRef.current.videoWidth;
+    const videoHeight = localVideoRef.current.videoHeight;
+
+    if (videoWidth === 0 || videoHeight === 0) return;
+
+    canvasRef.current.width = videoWidth;
+    canvasRef.current.height = videoHeight;
+
+    const canvasCtx = canvasRef.current.getContext("2d");
     if (!canvasCtx) return;
 
-    // Canvas 크기를 비디오 크기에 맞춤
-    canvasElement.width = localVideoRef.current.videoWidth || 640;
-    canvasElement.height = localVideoRef.current.videoHeight || 480;
-
     canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.clearRect(
+      0,
+      0,
+      canvasRef.current.width,
+      canvasRef.current.height
+    );
 
-    // 손 연결선과 점들 그리기
-    if (results.leftHandLandmarks) {
-      drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, {
-        color: "#CC0000",
-        lineWidth: 2,
-      });
-      drawLandmarks(canvasCtx, results.leftHandLandmarks, {
-        color: "#00FF00",
-        lineWidth: 1,
-      });
-    }
+    // 비디오 이미지 그리기
+    canvasCtx.globalCompositeOperation = "destination-atop";
+    canvasCtx.drawImage(
+      results.image,
+      0,
+      0,
+      canvasRef.current.width,
+      canvasRef.current.height
+    );
 
-    if (results.rightHandLandmarks) {
-      drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, {
-        color: "#00CC00",
-        lineWidth: 2,
-      });
-      drawLandmarks(canvasCtx, results.rightHandLandmarks, {
-        color: "#FF0000",
-        lineWidth: 1,
-      });
+    canvasCtx.globalCompositeOperation = "source-over";
+
+    // 손 그리기
+    if (window.MediaPipe?.drawConnectors && window.MediaPipe?.drawLandmarks) {
+      if (results.leftHandLandmarks) {
+        window.MediaPipe.drawConnectors(
+          canvasCtx,
+          results.leftHandLandmarks,
+          window.MediaPipe.HAND_CONNECTIONS,
+          { color: "#CC0000", lineWidth: 5 }
+        );
+        window.MediaPipe.drawLandmarks(canvasCtx, results.leftHandLandmarks, {
+          color: "#00FF00",
+          lineWidth: 2,
+        });
+      }
+
+      if (results.rightHandLandmarks) {
+        window.MediaPipe.drawConnectors(
+          canvasCtx,
+          results.rightHandLandmarks,
+          window.MediaPipe.HAND_CONNECTIONS,
+          { color: "#00CC00", lineWidth: 5 }
+        );
+        window.MediaPipe.drawLandmarks(canvasCtx, results.rightHandLandmarks, {
+          color: "#FF0000",
+          lineWidth: 2,
+        });
+      }
     }
 
     canvasCtx.restore();
   };
 
-  // MediaPipe 초기화
-  const initializeMediaPipe = async () => {
-    try {
-      addDebugLog("Initializing MediaPipe Holistic...");
-
-      const holistic = new Holistic({
-        locateFile: (file: string) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
-        },
-      });
-
-      holistic.setOptions({
-        selfieMode: true,
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        enableSegmentation: false, // 손만 필요하므로 false
-        smoothSegmentation: false,
-        refineFaceLandmarks: false, // 손만 필요하므로 false
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
-
-      holistic.onResults(onResults);
-      holisticRef.current = holistic;
-
-      addDebugLog("MediaPipe Holistic initialized successfully");
-
-      // 카메라 초기화
-      initializeCamera();
-    } catch (error) {
-      addDebugLog(`MediaPipe initialization error: ${error}`);
-    }
-  };
-
-  // 카메라 초기화
-  const initializeCamera = () => {
-    if (!localVideoRef.current || !holisticRef.current) {
-      addDebugLog("Video ref or holistic not ready for camera initialization");
+  // 카메라 스트림 시작
+  const startCamera = async () => {
+    if (!holisticRef.current || !localVideoRef.current) {
+      addDebugLog("Holistic or video ref not ready");
       return;
     }
 
     try {
-      addDebugLog("Initializing MediaPipe Camera...");
+      addDebugLog("Starting MediaPipe camera...");
 
-      const camera = new Camera(localVideoRef.current, {
-        onFrame: async () => {
-          if (localVideoRef.current && holisticRef.current && isAIEnabled) {
+      if (window.MediaPipe?.Camera) {
+        const camera = new window.MediaPipe.Camera(localVideoRef.current, {
+          onFrame: async () => {
+            if (!localVideoRef.current || !holisticRef.current) return;
             await holisticRef.current.send({ image: localVideoRef.current });
-          }
-        },
-        width: 640,
-        height: 480,
-      });
+          },
+          width: 640,
+          height: 480,
+        });
 
-      cameraRef.current = camera;
-      addDebugLog("MediaPipe Camera initialized");
+        cameraRef.current = camera;
+        camera.start();
+        addDebugLog("MediaPipe camera started");
+      } else {
+        addDebugLog("MediaPipe.Camera not available");
+      }
     } catch (error) {
-      addDebugLog(`Camera initialization error: ${error}`);
+      addDebugLog(`Camera start error: ${error}`);
     }
   };
 
@@ -239,109 +335,118 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       const aiWs = new WebSocket(`${AI_WS_URL}?role=client&room=${roomId}`);
 
       aiWs.onopen = () => {
-        addDebugLog("AI WebSocket connected");
+        addDebugLog("🟢 AI WebSocket connected");
         setAiStatus("connected");
-
-        // 카메라 시작
-        if (cameraRef.current) {
-          cameraRef.current.start();
-          addDebugLog("Camera started for AI processing");
-        }
       };
 
       aiWs.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          addDebugLog(`AI message received: ${data.type}`);
+          addDebugLog(`📤 AI response: ${data.type}`);
 
           if (data.type === "ai_result") {
             addDebugLog(
-              `AI translation: ${data.text || data.result || "No text"}`
+              `🔤 AI translation: ${data.text || data.result || "No text"}`
             );
-          } else if (data.type === "ai_status_change") {
-            // 다른 사용자의 AI 상태 변경
-            if (data.user_id !== user.id) {
-              setIsAIBlocked(data.ai_enabled);
-              addDebugLog(
-                `Other user ${data.ai_enabled ? "enabled" : "disabled"} AI`
-              );
-            }
+          }
+
+          // 상대방의 AI 상태 변경 알림 처리
+          if (data.type === "ai_status_change" && data.user_id !== user.id) {
+            setRemoteAIEnabled(data.ai_enabled);
+            addDebugLog(
+              `👥 Remote user ${data.ai_enabled ? "enabled" : "disabled"} AI`
+            );
           }
         } catch (error) {
-          addDebugLog(`AI message parse error: ${error}`);
+          addDebugLog(`❌ AI message parse error: ${error}`);
         }
       };
 
       aiWs.onclose = () => {
-        addDebugLog("AI WebSocket disconnected");
+        addDebugLog("🔴 AI WebSocket disconnected");
         setAiStatus("disconnected");
-
-        // 카메라 정지
-        if (cameraRef.current) {
-          cameraRef.current.stop();
-        }
       };
 
       aiWs.onerror = (error) => {
-        addDebugLog(`AI WebSocket error: ${error}`);
+        addDebugLog(`❌ AI WebSocket error: ${error}`);
         setAiStatus("disconnected");
       };
 
       aiWsRef.current = aiWs;
     } catch (error) {
-      addDebugLog(`AI WebSocket connection error: ${error}`);
+      addDebugLog(`❌ AI WebSocket connection error: ${error}`);
       setAiStatus("disconnected");
     }
   };
 
-  // AI 상태를 다른 사용자에게 알림
-  const notifyAIStatus = (enabled: boolean) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "ai_status_change",
-          user_id: user.id,
-          ai_enabled: enabled,
-          room_id: roomId,
-        })
-      );
-    }
-  };
-
   // AI 기능 토글
-  const toggleAI = () => {
-    if (isAIBlocked) {
-      addDebugLog("AI blocked - other user is using AI");
+  const toggleAI = async () => {
+    // 상대방이 이미 AI를 켰으면 막기
+    if (!isAIEnabled && remoteAIEnabled) {
+      addDebugLog("❌ Cannot enable AI: Remote user already has AI enabled");
+      alert("상대방이 이미 AI 기능을 사용 중입니다.");
       return;
     }
 
     if (isAIEnabled) {
       // AI 끄기
       setIsAIEnabled(false);
-      if (aiWsRef.current) {
+      if (aiWsRef.current?.readyState === WebSocket.OPEN) {
+        // 상대방에게 AI 꺼짐 알림
+        aiWsRef.current.send(
+          JSON.stringify({
+            type: "ai_status_change",
+            user_id: user.id,
+            ai_enabled: false,
+          })
+        );
         aiWsRef.current.close();
         aiWsRef.current = null;
       }
+
       if (cameraRef.current) {
-        cameraRef.current.stop();
+        cameraRef.current.stop?.();
+        cameraRef.current = null;
       }
+
       setAiStatus("disconnected");
-      setHandLandmarks([]);
-      addDebugLog("AI feature disabled");
-      notifyAIStatus(false);
+      addDebugLog("🔴 AI feature disabled");
     } else {
       // AI 켜기
-      setIsAIEnabled(true);
-      addDebugLog("AI feature enabled");
-
-      // MediaPipe 초기화 (아직 안 됐으면)
-      if (!holisticRef.current) {
-        initializeMediaPipe();
+      if (!mediaPipeLoaded) {
+        addDebugLog("⏳ Loading MediaPipe first...");
+        try {
+          await loadMediaPipeScripts();
+          await initializeHolistic();
+        } catch (error) {
+          addDebugLog(`❌ MediaPipe loading failed: ${error}`);
+          return;
+        }
       }
+
+      setIsAIEnabled(true);
+      addDebugLog("🟢 AI feature enabled");
 
       // AI WebSocket 연결
       connectAIWebSocket();
-      notifyAIStatus(true);
+
+      // 상대방에게 AI 켜짐 알림 (WebSocket 연결 후)
+      setTimeout(() => {
+        if (aiWsRef.current?.readyState === WebSocket.OPEN) {
+          aiWsRef.current.send(
+            JSON.stringify({
+              type: "ai_status_change",
+              user_id: user.id,
+              ai_enabled: true,
+            })
+          );
+        }
+      }, 1000);
+
+      // 카메라 스트림 시작
+      setTimeout(() => {
+        startCamera();
+      }, 1500);
     }
   };
 
@@ -414,14 +519,6 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
-
-        // 비디오가 로드되면 MediaPipe 카메라 초기화
-        localVideoRef.current.onloadedmetadata = () => {
-          addDebugLog("Video metadata loaded - ready for MediaPipe");
-          if (isAIEnabled && !cameraRef.current && holisticRef.current) {
-            initializeCamera();
-          }
-        };
       }
 
       return stream;
@@ -432,7 +529,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // django WebSocket 연결 (수정됨)
+  // django WebSocket 연결 (수정됨 - AI 상태 알림 처리 추가)
   const connectWebSocket = (stream: MediaStream) => {
     addDebugLog("Connecting to WebSocket...");
     const ws = new WebSocket(
@@ -471,11 +568,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           break;
 
         case "ai_status_change":
-          // AI 상태 변경 메시지 처리
           if (data.user_id !== user.id) {
-            setIsAIBlocked(data.ai_enabled);
+            setRemoteAIEnabled(data.ai_enabled);
             addDebugLog(
-              `Other user ${data.ai_enabled ? "enabled" : "disabled"} AI`
+              `👥 Remote user ${data.ai_enabled ? "enabled" : "disabled"} AI`
             );
           }
           break;
@@ -705,13 +801,9 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       clearInterval(connectionTimeRef.current);
     }
 
-    if (frameIntervalRef.current) {
-      clearInterval(frameIntervalRef.current);
-      frameIntervalRef.current = null;
-    }
-
     if (cameraRef.current) {
-      cameraRef.current.stop();
+      cameraRef.current.stop?.();
+      cameraRef.current = null;
     }
 
     if (localStreamRef.current) {
@@ -737,6 +829,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // MediaPipe 초기화 (컴포넌트 마운트 시)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      loadMediaPipeScripts().catch((error) => {
+        addDebugLog(`MediaPipe loading failed: ${error}`);
+      });
+    }
+  }, []);
 
   // 컴포넌트 초기화 (기존 코드)
   useEffect(() => {
@@ -793,7 +894,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         </div>
 
         {/* AI 상태 표시 */}
-        <div className="text-xs">
+        <div className="text-xs flex items-center">
           <span
             className={`inline-block w-2 h-2 rounded-full mr-2 ${
               aiStatus === "connected"
@@ -803,16 +904,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
                   : "bg-red-500"
             }`}
           ></span>
-          AI: {aiStatus}
+          <span className="mr-3">AI: {aiStatus}</span>
+          {mediaPipeLoaded && <span className="mr-3 text-green-400">MP✓</span>}
           {isAIEnabled && handLandmarks.length > 0 && (
-            <span className="ml-2">👋 {handLandmarks.length}</span>
+            <span className="text-green-300">👋 {handLandmarks.length}</span>
           )}
-          {isAIBlocked && <span className="ml-2 text-red-400">(차단됨)</span>}
+          {remoteAIEnabled && <span className="text-orange-300">원격AI</span>}
         </div>
       </div>
 
-      {/* 디버그 정보 */}
-      <div className="bg-red-900 text-white p-2 text-xs flex-shrink-0 max-h-32 overflow-y-auto">
+      {/* 디버그 정보 - 좌표값 실시간 표시 */}
+      <div className="bg-red-900 text-white p-2 text-xs flex-shrink-0 max-h-40 overflow-y-auto">
         {debugInfo.map((info, index) => (
           <div
             key={index}
@@ -821,24 +923,22 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             {info}
           </div>
         ))}
-        {/* 실시간 좌표 표시 */}
-        {handLandmarks.length > 0 && (
+
+        {/* 실시간 좌표 디버그 정보 */}
+        {isAIEnabled && handLandmarks.length > 0 && (
           <div className="text-green-300 mt-1 border-t border-green-700 pt-1">
-            <div>
-              Hand coordinates:{" "}
-              {handLandmarks
-                .map((hand, i) => `Hand${i + 1}[${hand.length}pts] `)
-                .join("")}
-            </div>
-            {handLandmarks[0] && (
-              <div>
-                Sample: ({handLandmarks[0][0]?.x?.toFixed(3)},{" "}
-                {handLandmarks[0][0]?.y?.toFixed(3)})
+            <div>🖐️ Hands detected: {handLandmarks.length}</div>
+            {handLandmarks.map((hand, handIndex) => (
+              <div key={handIndex} className="ml-2">
+                Hand{handIndex + 1}: {hand.length} points | Wrist: (
+                {hand[0]?.x?.toFixed(3)}, {hand[0]?.y?.toFixed(3)}) | Thumb: (
+                {hand[4]?.x?.toFixed(3)}, {hand[4]?.y?.toFixed(3)}) | Index: (
+                {hand[8]?.x?.toFixed(3)}, {hand[8]?.y?.toFixed(3)})
               </div>
-            )}
-            <div>
-              Total landmarks sent:{" "}
-              {handLandmarks.reduce((sum, hand) => sum + hand.length, 0)}
+            ))}
+            <div className="text-xs text-gray-300">
+              Total coordinates sent:{" "}
+              {handLandmarks.reduce((sum, hand) => sum + hand.length, 0)} points
             </div>
           </div>
         )}
@@ -847,7 +947,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       {/* 비디오 영역 */}
       <div
         className="flex-1 relative min-h-0"
-        style={{ maxHeight: "calc(100vh - 220px)" }}
+        style={{ maxHeight: "calc(100vh - 240px)" }}
       >
         {/* 원격 비디오 (큰 화면) */}
         <video
@@ -864,20 +964,20 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           autoPlay
           playsInline
           muted
-          className={`absolute top-2 right-2 w-32 h-24 sm:w-40 sm:h-30 bg-gray-800 rounded-lg object-cover border-2 ${
+          className={`absolute top-2 right-2 w-24 h-18 sm:w-32 sm:h-24 bg-gray-800 rounded-lg object-cover border-2 transition-colors ${
             isAIEnabled ? "border-green-400" : "border-white"
           }`}
           style={{ transform: "scaleX(-1)" }}
         />
 
-        {/* MediaPipe 손 그리기용 캔버스 */}
-        {isAIEnabled && (
-          <canvas
-            ref={canvasRef}
-            className="absolute top-2 right-2 w-32 h-24 sm:w-40 sm:h-30 pointer-events-none rounded-lg"
-            style={{ transform: "scaleX(-1)" }}
-          />
-        )}
+        {/* MediaPipe 손 인식 오버레이 캔버스 */}
+        <canvas
+          ref={canvasRef}
+          className={`absolute top-2 right-2 w-24 h-18 sm:w-32 sm:h-24 rounded-lg pointer-events-none ${
+            isAIEnabled ? "opacity-70" : "opacity-0"
+          } transition-opacity`}
+          style={{ transform: "scaleX(-1)" }}
+        />
 
         {/* 연결 대기 중일 때 플레이스홀더 */}
         {!remoteStream &&
@@ -914,24 +1014,24 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             <span className="sm:hidden">{isCameraOn ? "📹" : "📷"}</span>
           </Button>
 
-          {/* AI 기능 토글 버튼 */}
+          {/* AI 기능 토글 버튼 - 상대방이 AI 켜면 비활성화 */}
           <Button
             onClick={toggleAI}
-            disabled={isAIBlocked}
+            disabled={remoteAIEnabled && !isAIEnabled}
             variant={isAIEnabled ? "default" : "outline"}
             className={`flex-1 max-w-[100px] px-2 py-2 text-xs sm:text-sm sm:px-4 ${
-              isAIEnabled
-                ? "bg-green-600 hover:bg-green-700"
-                : isAIBlocked
-                  ? "bg-gray-500 cursor-not-allowed"
-                  : ""
-            }`}
+              isAIEnabled ? "bg-green-600 hover:bg-green-700" : ""
+            } ${remoteAIEnabled && !isAIEnabled ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <span className="hidden sm:inline">
-              {isAIBlocked ? "AI 차단됨" : isAIEnabled ? "AI 켜짐" : "AI 켜기"}
+              {isAIEnabled
+                ? "AI 켜짐"
+                : remoteAIEnabled
+                  ? "AI 사용중"
+                  : "AI 끄기"}
             </span>
             <span className="sm:hidden">
-              {isAIBlocked ? "🚫" : isAIEnabled ? "🤖" : "🔇"}
+              {isAIEnabled ? "🤖" : remoteAIEnabled ? "⏳" : "🔇"}
             </span>
           </Button>
 
@@ -948,3 +1048,130 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     </div>
   );
 }
+
+// MediaPipe 스크립트 로딩 함수를 컴포넌트 외부로 분리
+const loadMediaPipeScripts = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    // 이미 로드되었는지 확인
+    if (window.MediaPipe?.Holistic && window.MediaPipe?.Camera) {
+      resolve();
+      return;
+    }
+
+    const scripts = [
+      "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js",
+      "https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1640029074/drawing_utils.js",
+      "https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/holistic.js",
+    ];
+
+    let loadedCount = 0;
+    const totalCount = scripts.length;
+
+    const loadScript = (src: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        // 이미 있는 스크립트인지 확인
+        if (document.querySelector(`script[src="${src}"]`)) {
+          resolve();
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        script.crossOrigin = "anonymous";
+
+        script.onload = () => {
+          console.log(`✅ Loaded: ${src.split("/").pop()}`);
+          resolve();
+        };
+
+        script.onerror = () => {
+          console.error(`❌ Failed to load: ${src.split("/").pop()}`);
+          reject(new Error(`Failed to load ${src}`));
+        };
+
+        document.head.appendChild(script);
+      });
+    };
+
+    // 순차적으로 스크립트 로드
+    const loadSequentially = async () => {
+      try {
+        for (const src of scripts) {
+          await loadScript(src);
+          loadedCount++;
+        }
+
+        // 모든 스크립트 로드 완료 후 MediaPipe 객체 확인
+        let retries = 0;
+        const maxRetries = 20;
+
+        const checkMediaPipe = () => {
+          if (
+            window.MediaPipe?.Holistic &&
+            window.MediaPipe?.Camera &&
+            window.MediaPipe?.drawConnectors
+          ) {
+            console.log("🎉 All MediaPipe objects loaded successfully");
+            resolve();
+          } else if (retries < maxRetries) {
+            retries++;
+            console.log(
+              `⏳ Waiting for MediaPipe objects... (${retries}/${maxRetries})`
+            );
+            setTimeout(checkMediaPipe, 100);
+          } else {
+            console.error(
+              "❌ MediaPipe objects not found after loading scripts"
+            );
+            reject(new Error("MediaPipe objects not available after loading"));
+          }
+        };
+
+        checkMediaPipe();
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    loadSequentially();
+  });
+};
+
+// Holistic 초기화 함수를 컴포넌트 외부로 분리
+const initializeHolistic = async (
+  onResults: (results: any) => void
+): Promise<any> => {
+  try {
+    if (!window.MediaPipe?.Holistic) {
+      throw new Error("MediaPipe.Holistic not available");
+    }
+
+    console.log("🚀 Initializing Holistic...");
+
+    const holistic = new window.MediaPipe.Holistic({
+      locateFile: (file: string) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${file}`;
+      },
+    });
+
+    holistic.setOptions({
+      selfieMode: true,
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false, // 필요없으면 끄기
+      smoothSegmentation: false,
+      refineFaceLandmarks: false, // 얼굴 필요없으면 끄기
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5,
+    });
+
+    holistic.onResults(onResults);
+
+    console.log("✅ Holistic initialized successfully");
+    return holistic;
+  } catch (error) {
+    console.error(`❌ Holistic initialization error: ${error}`);
+    throw error;
+  }
+};
