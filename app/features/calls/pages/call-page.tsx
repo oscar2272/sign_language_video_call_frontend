@@ -53,6 +53,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [handLandmarks, setHandLandmarks] = useState<any[]>([]);
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
 
+  // 자막 상태들
+  const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
+  const [subtitleHistory, setSubtitleHistory] = useState<
+    Array<{ text: string; timestamp: number; score?: number }>
+  >([]);
+  const [showSubtitleHistory, setShowSubtitleHistory] = useState(false);
+
   // Refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -317,9 +324,30 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           addDebugLog(`AI response: ${data.type}`);
 
           if (data.type === "ai_result") {
+            const resultText = data.text || data.result || "No text";
+            const score = data.score || 0;
+
             addDebugLog(
-              `AI translation: ${data.text || data.result || "No text"}`
+              `AI translation: ${resultText} (score: ${score.toFixed(3)})`
             );
+
+            // 현재 자막 업데이트
+            setCurrentSubtitle(resultText);
+
+            // 자막 히스토리에 추가
+            setSubtitleHistory((prev) => [
+              ...prev.slice(-9), // 최대 10개까지 저장
+              {
+                text: resultText,
+                timestamp: Date.now(),
+                score: score,
+              },
+            ]);
+
+            // 3초 후 현재 자막 숨기기
+            setTimeout(() => {
+              setCurrentSubtitle((prev) => (prev === resultText ? "" : prev));
+            }, 3000);
           }
         } catch (error) {
           addDebugLog(`AI message parse error: ${error}`);
@@ -890,6 +918,59 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
             className="absolute top-2 right-2 w-24 h-18 sm:w-32 sm:h-24 pointer-events-none"
             style={{ transform: "scaleX(-1)" }}
           />
+        )}
+
+        {/* 현재 자막 표시 */}
+        {currentSubtitle && (
+          <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-80 text-white px-4 py-2 rounded-lg text-center max-w-md">
+            <div className="text-lg font-bold">{currentSubtitle}</div>
+          </div>
+        )}
+
+        {/* 자막 히스토리 버튼 */}
+        {subtitleHistory.length > 0 && (
+          <button
+            onClick={() => setShowSubtitleHistory(!showSubtitleHistory)}
+            className="absolute bottom-2 left-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+          >
+            자막 기록 ({subtitleHistory.length})
+          </button>
+        )}
+
+        {/* 자막 히스토리 패널 */}
+        {showSubtitleHistory && (
+          <div className="absolute bottom-12 left-2 bg-black bg-opacity-90 text-white p-3 rounded-lg max-w-sm max-h-60 overflow-y-auto">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-sm font-bold">번역 기록</h3>
+              <button
+                onClick={() => setSubtitleHistory([])}
+                className="text-red-400 hover:text-red-300 text-xs"
+              >
+                지우기
+              </button>
+            </div>
+            <div className="space-y-1">
+              {subtitleHistory
+                .slice()
+                .reverse()
+                .map((item, index) => (
+                  <div
+                    key={index}
+                    className="text-xs border-b border-gray-600 pb-1"
+                  >
+                    <div className="font-medium">{item.text}</div>
+                    <div className="text-gray-400 text-xs">
+                      {new Date(item.timestamp).toLocaleTimeString()}
+                      {item.score !== undefined && (
+                        <span className="ml-2">
+                          신뢰도: {(item.score * 100).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
         )}
 
         {/* 연결 대기 중일 때 플레이스홀더 */}
