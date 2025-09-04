@@ -120,3 +120,4 @@ export async function cancelFriendRequest(token: string, requestId: number) {
 
   return true;
 }
+
