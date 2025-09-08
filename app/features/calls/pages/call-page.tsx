@@ -221,7 +221,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
 
     if (aiWsRef.current.readyState !== WebSocket.OPEN) {
-      const stateNames = {
+      const stateNames: { [key: number]: string } = {
         0: "CONNECTING",
         1: "OPEN",
         2: "CLOSING",
