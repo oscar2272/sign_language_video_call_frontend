@@ -58,7 +58,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [frameBuffer, setFrameBuffer] = useState<any[][]>([]);
   const frameBufferRef = useRef<any[][]>([]);
   const [bufferCount, setBufferCount] = useState(0);
-  const FRAME_BUFFER_SIZE = 15; // 15프레임 모아서 전송
+  const FRAME_BUFFER_SIZE = 10; // 10프레임 모아서 전송
 
   // 자막 상태들
   const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
