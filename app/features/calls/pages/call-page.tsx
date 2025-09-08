@@ -54,6 +54,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
   const [isMediaPipeInitializing, setIsMediaPipeInitializing] = useState(false);
 
+  // 15프레임 버퍼 상태들
+  const [frameBuffer, setFrameBuffer] = useState<any[][]>([]);
+  const frameBufferRef = useRef<any[][]>([]);
+  const [bufferCount, setBufferCount] = useState(0);
+  const FRAME_BUFFER_SIZE = 15; // 15프레임 모아서 전송
+
   // 자막 상태들
   const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
   const [subtitleHistory, setSubtitleHistory] = useState<
@@ -91,6 +97,73 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 클라이언트 사이드에서만 실행되는 함수들을 위한 헬퍼
   const isClient = typeof window !== "undefined";
+
+  // 15프레임 시퀀스 전송 함수
+  const sendFrameSequence = (frameSequence: any[][]) => {
+    if (
+      !isAIEnabledRef.current ||
+      !aiWsRef.current ||
+      aiWsRef.current.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    const message = {
+      type: "hand_landmarks_sequence",
+      room_id: roomId,
+      frame_sequence: frameSequence, // 15프레임 x 21좌표 배열
+      timestamp: Date.now(),
+      test_id: Math.random().toString(36).substr(2, 9),
+    };
+
+    try {
+      const messageStr = JSON.stringify(message);
+      aiWsRef.current.send(messageStr);
+      addDebugLog(`✅ 15프레임 시퀀스 전송 성공! [${message.test_id}]`);
+      addDebugLog(`📦 전송 크기: ${new Blob([messageStr]).size} bytes`);
+      addDebugLog(
+        `🎬 프레임 수: ${frameSequence.length}, 총 좌표: ${frameSequence.length * 21}`
+      );
+    } catch (error) {
+      addDebugLog(`❌ 시퀀스 전송 실패: ${error}`);
+    }
+  };
+
+  // 프레임 버퍼에 추가하는 함수
+  const addToFrameBuffer = (handData: Array<{ x: number; y: number }>) => {
+    // 21개 좌표가 없으면 0으로 패딩
+    const paddedHandData = [];
+    for (let i = 0; i < 21; i++) {
+      if (i < handData.length) {
+        paddedHandData.push([handData[i].x, handData[i].y]);
+      } else {
+        paddedHandData.push([0, 0]); // 빈 좌표는 0으로 패딩
+      }
+    }
+
+    // 새로운 프레임을 버퍼에 추가
+    const newBuffer = [...frameBufferRef.current, paddedHandData];
+
+    if (newBuffer.length >= FRAME_BUFFER_SIZE) {
+      // 15프레임이 모이면 전송
+      const frameSequence = newBuffer.slice(-FRAME_BUFFER_SIZE); // 최근 15프레임만 사용
+      sendFrameSequence(frameSequence);
+
+      // 버퍼 초기화 (슬라이딩 윈도우 방식으로 일부 유지)
+      frameBufferRef.current = newBuffer.slice(-5); // 마지막 5프레임 유지해서 연속성 확보
+      setFrameBuffer(frameBufferRef.current);
+      setBufferCount(frameBufferRef.current.length);
+
+      addDebugLog(`🎯 15프레임 전송 완료, 버퍼 리셋 (5프레임 유지)`);
+    } else {
+      // 버퍼에 추가만
+      frameBufferRef.current = newBuffer;
+      setFrameBuffer(newBuffer);
+      setBufferCount(newBuffer.length);
+
+      addDebugLog(`📥 프레임 버퍼링: ${newBuffer.length}/${FRAME_BUFFER_SIZE}`);
+    }
+  };
 
   // MediaPipe 스크립트 로드
   const loadMediaPipeScripts = (): Promise<void> => {
@@ -181,11 +254,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // 손 인식 결과 처리
+  // 손 인식 결과 처리 - 15프레임 버퍼링
   const onHandsResults = (results: any) => {
     if (!results.multiHandLandmarks) {
       setHandLandmarks([]);
-      addDebugLog("❌ 손 인식 안됨 - 데이터 없음");
+      // 손이 인식되지 않아도 빈 프레임으로 처리 (연속성 유지)
+      if (isAIEnabledRef.current) {
+        addToFrameBuffer([]);
+      }
       return;
     }
 
@@ -204,68 +280,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
 
     setHandLandmarks(landmarks);
-    addDebugLog(
-      `👋 손 인식됨: ${landmarks.length}개 손, ${landmarks.reduce((sum, hand) => sum + hand.length, 0)}개 포인트`
-    );
 
-    // *** 여기가 핵심 - ref를 사용해서 최신 상태 확인 ***
-    addDebugLog(`🔍 전송 조건 체크:`);
-    addDebugLog(`  - isAIEnabledRef.current: ${isAIEnabledRef.current}`);
-    addDebugLog(`  - landmarks.length > 0: ${landmarks.length > 0}`);
-    addDebugLog(`  - aiWsRef.current 존재: ${!!aiWsRef.current}`);
-    addDebugLog(`  - WebSocket 상태: ${aiWsRef.current?.readyState}`);
+    // 첫 번째 손만 사용 (모델이 한 손만 처리)
+    const primaryHand = landmarks.length > 0 ? landmarks[0] : [];
 
-    if (!isAIEnabledRef.current) {
-      addDebugLog("⚠️ AI 기능이 꺼져있음 - 전송 안함");
-      return;
-    }
-
-    if (landmarks.length === 0) {
-      addDebugLog("⚠️ 좌표 데이터 없음 - 전송 안함");
-      return;
-    }
-
-    if (!aiWsRef.current) {
-      addDebugLog("⚠️ WebSocket 객체가 없음 - 전송 안함");
-      return;
-    }
-
-    if (aiWsRef.current.readyState !== WebSocket.OPEN) {
-      const stateNames: { [key: number]: string } = {
-        0: "CONNECTING",
-        1: "OPEN",
-        2: "CLOSING",
-        3: "CLOSED",
-      };
-      addDebugLog(
-        `⚠️ WebSocket 상태가 OPEN이 아님: ${stateNames[aiWsRef.current.readyState]} (${aiWsRef.current.readyState})`
-      );
-      return;
-    }
-
-    // 모든 조건 통과 - 실제 전송
-    const message = {
-      type: "hand_landmarks",
-      room_id: roomId,
-      landmarks: landmarks,
-      timestamp: Date.now(),
-      test_id: Math.random().toString(36).substr(2, 9),
-    };
-
-    try {
-      const messageStr = JSON.stringify(message);
-      aiWsRef.current.send(messageStr);
-      addDebugLog(`✅ 좌표 데이터 전송 성공! [${message.test_id}]`);
-      addDebugLog(`📦 전송 크기: ${new Blob([messageStr]).size} bytes`);
-
-      // 실제 전송된 첫 번째 좌표 샘플 로그
-      if (landmarks[0] && landmarks[0][0]) {
-        addDebugLog(
-          `📍 샘플 좌표: x=${landmarks[0][0].x.toFixed(3)}, y=${landmarks[0][0].y.toFixed(3)}`
-        );
-      }
-    } catch (error) {
-      addDebugLog(`❌ 좌표 데이터 전송 실패: ${error}`);
+    if (isAIEnabledRef.current) {
+      addToFrameBuffer(primaryHand);
     }
   };
 
@@ -406,6 +426,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       setIsAIEnabled(false);
       isAIEnabledRef.current = false; // ref도 업데이트
 
+      // 버퍼 초기화
+      frameBufferRef.current = [];
+      setFrameBuffer([]);
+      setBufferCount(0);
+
       if (aiWsRef.current) {
         aiWsRef.current.close();
         aiWsRef.current = null;
@@ -421,6 +446,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       addDebugLog("AI 기능 활성화 중...");
       setIsAIEnabled(true);
       isAIEnabledRef.current = true; // ref도 업데이트
+
+      // 버퍼 초기화
+      frameBufferRef.current = [];
+      setFrameBuffer([]);
+      setBufferCount(0);
 
       // MediaPipe 초기화 (아직 안 됐으면)
       if (!mediaPipeLoaded) {
@@ -827,6 +857,11 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     setIsAIEnabled(false);
     isAIEnabledRef.current = false;
     setAiStatus("disconnected");
+
+    // 버퍼 초기화
+    frameBufferRef.current = [];
+    setFrameBuffer([]);
+    setBufferCount(0);
   };
 
   // 시간 포맷팅 (기존 코드)
@@ -955,7 +990,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         <div className="text-blue-300 mt-1">
           🔧 State: AI={isAIEnabled ? "ON" : "OFF"} | MP=
           {mediaPipeLoaded ? "OK" : "NO"} | Init=
-          {isMediaPipeInitializing ? "YES" : "NO"} | WS={aiStatus}
+          {isMediaPipeInitializing ? "YES" : "NO"} | WS={aiStatus} | Buffer=
+          {bufferCount}/{FRAME_BUFFER_SIZE}
         </div>
       </div>
 
