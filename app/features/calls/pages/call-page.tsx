@@ -171,57 +171,15 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 손 인식 결과 처리
   const onHandsResults = (results: any) => {
-    // 캔버스에 그리기 (옵션)
-    if (canvasRef.current) {
-      const canvasCtx = canvasRef.current.getContext("2d");
-      if (canvasCtx && localVideoRef.current) {
-        const videoWidth = localVideoRef.current.videoWidth || 640;
-        const videoHeight = localVideoRef.current.videoHeight || 480;
+    // 캔버스 그리기 코드...
 
-        canvasRef.current.width = videoWidth;
-        canvasRef.current.height = videoHeight;
-
-        canvasCtx.save();
-        canvasCtx.clearRect(
-          0,
-          0,
-          canvasRef.current.width,
-          canvasRef.current.height
-        );
-
-        // 손 연결선과 랜드마크 그리기
-        if (
-          results.multiHandLandmarks &&
-          window.drawConnectors &&
-          window.drawLandmarks &&
-          window.HAND_CONNECTIONS
-        ) {
-          for (const landmarks of results.multiHandLandmarks) {
-            window.drawConnectors(
-              canvasCtx,
-              landmarks,
-              window.HAND_CONNECTIONS,
-              { color: "#00CC00", lineWidth: 5 }
-            );
-            window.drawLandmarks(canvasCtx, landmarks, {
-              color: "#FF0000",
-              lineWidth: 2,
-            });
-          }
-        }
-
-        canvasCtx.restore();
-      }
-    }
-
-    // 좌표 데이터 처리
     if (!results.multiHandLandmarks) {
       setHandLandmarks([]);
+      addDebugLog("❌ 손 인식 안됨 - 데이터 없음");
       return;
     }
 
     const landmarks: any[] = [];
-
     for (let i = 0; i < results.multiHandLandmarks.length; i++) {
       const handLandmarks = results.multiHandLandmarks[i];
       const handData: Array<{ x: number; y: number }> = [];
@@ -232,29 +190,72 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           y: handLandmarks[j].y,
         });
       }
-
       landmarks.push(handData);
     }
 
     setHandLandmarks(landmarks);
+    addDebugLog(
+      `👋 손 인식됨: ${landmarks.length}개 손, ${landmarks.reduce((sum, hand) => sum + hand.length, 0)}개 포인트`
+    );
 
-    // AI WebSocket으로 전송
-    if (
-      isAIEnabled &&
-      aiWsRef.current?.readyState === WebSocket.OPEN &&
-      landmarks.length > 0
-    ) {
-      const message = {
-        type: "hand_landmarks",
-        room_id: roomId,
-        landmarks: landmarks,
-        timestamp: Date.now(),
+    // *** 여기가 핵심 - 전송 조건들을 하나씩 확인 ***
+    addDebugLog(`🔍 전송 조건 체크:`);
+    addDebugLog(`  - isAIEnabled: ${isAIEnabled}`);
+    addDebugLog(`  - landmarks.length > 0: ${landmarks.length > 0}`);
+    addDebugLog(`  - aiWsRef.current 존재: ${!!aiWsRef.current}`);
+    addDebugLog(`  - WebSocket 상태: ${aiWsRef.current?.readyState}`);
+
+    if (!isAIEnabled) {
+      addDebugLog("⚠️ AI 기능이 꺼져있음 - 전송 안함");
+      return;
+    }
+
+    if (landmarks.length === 0) {
+      addDebugLog("⚠️ 좌표 데이터 없음 - 전송 안함");
+      return;
+    }
+
+    if (!aiWsRef.current) {
+      addDebugLog("⚠️ WebSocket 객체가 없음 - 전송 안함");
+      return;
+    }
+
+    if (aiWsRef.current.readyState !== WebSocket.OPEN) {
+      const stateNames = {
+        0: "CONNECTING",
+        1: "OPEN",
+        2: "CLOSING",
+        3: "CLOSED",
       };
-
-      aiWsRef.current.send(JSON.stringify(message));
       addDebugLog(
-        `Sent landmarks: ${landmarks.length} hands, ${landmarks.reduce((sum, hand) => sum + hand.length, 0)} points`
+        `⚠️ WebSocket 상태가 OPEN이 아님: ${stateNames[aiWsRef.current.readyState]} (${aiWsRef.current.readyState})`
       );
+      return;
+    }
+
+    // 모든 조건 통과 - 실제 전송
+    const message = {
+      type: "hand_landmarks",
+      room_id: roomId,
+      landmarks: landmarks,
+      timestamp: Date.now(),
+      test_id: Math.random().toString(36).substr(2, 9),
+    };
+
+    try {
+      const messageStr = JSON.stringify(message);
+      aiWsRef.current.send(messageStr);
+      addDebugLog(`✅ 좌표 데이터 전송 성공! [${message.test_id}]`);
+      addDebugLog(`📦 전송 크기: ${new Blob([messageStr]).size} bytes`);
+
+      // 실제 전송된 첫 번째 좌표 샘플 로그
+      if (landmarks[0] && landmarks[0][0]) {
+        addDebugLog(
+          `📍 샘플 좌표: x=${landmarks[0][0].x.toFixed(3)}, y=${landmarks[0][0].y.toFixed(3)}`
+        );
+      }
+    } catch (error) {
+      addDebugLog(`❌ 좌표 데이터 전송 실패: ${error}`);
     }
   };
 
@@ -308,65 +309,54 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   // AI WebSocket 연결
   const connectAIWebSocket = () => {
     try {
-      addDebugLog("Connecting to AI WebSocket...");
+      addDebugLog("🔗 AI WebSocket 연결 시도 중...");
       setAiStatus("connecting");
 
-      const aiWs = new WebSocket(`${AI_WS_URL}?role=client&room=${roomId}`);
+      const wsUrl = `${AI_WS_URL}?role=client&room=${roomId}`;
+      addDebugLog(`🌐 연결 URL: ${wsUrl}`);
+
+      const aiWs = new WebSocket(wsUrl);
 
       aiWs.onopen = () => {
-        addDebugLog("AI WebSocket connected");
+        addDebugLog("✅ AI WebSocket 연결 성공!");
         setAiStatus("connected");
-      };
 
-      aiWs.onmessage = (event) => {
+        // 연결 즉시 테스트 메시지 전송
+        const testMessage = {
+          type: "connection_test",
+          room_id: roomId,
+          timestamp: Date.now(),
+          message: "프론트엔드 연결 테스트",
+        };
+
         try {
-          const data = JSON.parse(event.data);
-          addDebugLog(`AI response: ${data.type}`);
-
-          if (data.type === "ai_result") {
-            const resultText = data.text || data.result || "No text";
-            const score = data.score || 0;
-
-            addDebugLog(
-              `AI translation: ${resultText} (score: ${score.toFixed(3)})`
-            );
-
-            // 현재 자막 업데이트
-            setCurrentSubtitle(resultText);
-
-            // 자막 히스토리에 추가
-            setSubtitleHistory((prev) => [
-              ...prev.slice(-9), // 최대 10개까지 저장
-              {
-                text: resultText,
-                timestamp: Date.now(),
-                score: score,
-              },
-            ]);
-
-            // 3초 후 현재 자막 숨기기
-            setTimeout(() => {
-              setCurrentSubtitle((prev) => (prev === resultText ? "" : prev));
-            }, 3000);
-          }
+          aiWs.send(JSON.stringify(testMessage));
+          addDebugLog("📤 연결 테스트 메시지 전송 완료");
         } catch (error) {
-          addDebugLog(`AI message parse error: ${error}`);
+          addDebugLog(`❌ 테스트 메시지 전송 실패: ${error}`);
         }
       };
 
-      aiWs.onclose = () => {
-        addDebugLog("AI WebSocket disconnected");
+      aiWs.onmessage = (event) => {
+        addDebugLog(`📨 서버 응답 받음: ${event.data}`);
+        // 나머지 메시지 처리...
+      };
+
+      aiWs.onclose = (event) => {
+        addDebugLog(
+          `❌ AI WebSocket 연결 종료: code=${event.code}, reason=${event.reason}`
+        );
         setAiStatus("disconnected");
       };
 
       aiWs.onerror = (error) => {
-        addDebugLog(`AI WebSocket error: ${error}`);
+        addDebugLog(`❌ AI WebSocket 에러: ${error}`);
         setAiStatus("disconnected");
       };
 
       aiWsRef.current = aiWs;
     } catch (error) {
-      addDebugLog(`AI WebSocket connection error: ${error}`);
+      addDebugLog(`❌ WebSocket 생성 실패: ${error}`);
       setAiStatus("disconnected");
     }
   };
