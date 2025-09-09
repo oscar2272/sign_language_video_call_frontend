@@ -54,11 +54,13 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
   const [isMediaPipeInitializing, setIsMediaPipeInitializing] = useState(false);
 
-  // 15프레임 버퍼 상태들
+  // 프레임 버퍼 상태들
   const [frameBuffer, setFrameBuffer] = useState<any[][]>([]);
   const frameBufferRef = useRef<any[][]>([]);
   const [bufferCount, setBufferCount] = useState(0);
   const FRAME_BUFFER_SIZE = 10; // 10프레임 모아서 전송
+  const [lastFrameTime, setLastFrameTime] = useState(0); // 프레임 전송 제어
+  const FRAME_SEND_INTERVAL = 100; // 100ms마다 전송 (초당 10회)
 
   // 자막 상태들 (기존)
   const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
@@ -106,7 +108,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     MIN_DISPLAY_TIME: 2000, // 최소 2초간 표시
     STABILITY_DELAY: 500, // 0.5초 안정화 지연
     MAX_DISPLAY_TIME: 5000, // 최대 5초간 표시
-    MIN_CONFIDENCE: 0.7, // 최소 신뢰도 (70%)
+    MIN_CONFIDENCE: 0.6, // 최소 신뢰도 (60%)
     DUPLICATE_THRESHOLD: 0.8, // 중복 판정 임계값 (80% 유사)
   };
 
@@ -170,7 +172,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     // 신뢰도가 너무 낮으면 무시
     if (confidence < SUBTITLE_CONFIG.MIN_CONFIDENCE) {
-      addDebugLog(`❌ 자막 신뢰도 낮음: ${(confidence * 100).toFixed(1)}%`);
+      addDebugLog(`자막 신뢰도 낮음: ${(confidence * 100).toFixed(1)}%`);
       return;
     }
 
@@ -181,9 +183,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         newText.toLowerCase()
       );
       if (similarity > SUBTITLE_CONFIG.DUPLICATE_THRESHOLD) {
-        addDebugLog(
-          `⚪ 유사한 자막 무시: ${(similarity * 100).toFixed(1)}% 유사`
-        );
+        addDebugLog(`유사한 자막 무시: ${(similarity * 100).toFixed(1)}% 유사`);
         return;
       }
     }
@@ -208,7 +208,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }, SUBTITLE_CONFIG.STABILITY_DELAY);
 
     addDebugLog(
-      `📝 자막 큐 추가: "${newText}" (신뢰도: ${(confidence * 100).toFixed(1)}%)`
+      `자막 큐 추가: "${newText}" (신뢰도: ${(confidence * 100).toFixed(1)}%)`
     );
   };
 
@@ -222,7 +222,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
     // 마지막 업데이트로부터 최소 시간이 지났는지 확인
     if (now - lastSubtitleUpdate < SUBTITLE_CONFIG.MIN_DISPLAY_TIME) {
-      addDebugLog(`⏰ 자막 업데이트 너무 빨름, 지연됨`);
+      addDebugLog(`자막 업데이트 너무 빨름, 지연됨`);
       return;
     }
 
@@ -240,7 +240,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       },
     ]);
 
-    addDebugLog(`✅ 자막 표시: "${subtitle.text}"`);
+    addDebugLog(`자막 표시: "${subtitle.text}"`);
 
     // 기존 타이머 클리어
     if (subtitleTimeoutRef.current) {
@@ -251,7 +251,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     subtitleTimeoutRef.current = setTimeout(() => {
       setDisplayedSubtitle("");
       setCurrentSubtitle("");
-      addDebugLog(`🗑️ 자막 자동 제거`);
+      addDebugLog(`자막 자동 제거`);
     }, SUBTITLE_CONFIG.MAX_DISPLAY_TIME);
   };
 
@@ -271,10 +271,10 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       subtitleStabilityRef.current = null;
     }
 
-    addDebugLog(`🧹 자막 수동 제거`);
+    addDebugLog(`자막 수동 제거`);
   };
 
-  // 15프레임 시퀀스 전송 함수
+  // 프레임 시퀀스 전송 함수
   const sendFrameSequence = (frameSequence: any[][]) => {
     if (
       !isAIEnabledRef.current ||
@@ -287,7 +287,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     const message = {
       type: "hand_landmarks_sequence",
       room_id: roomId,
-      frame_sequence: frameSequence, // 15프레임 x 21좌표 배열
+      frame_sequence: frameSequence, // 10프레임 x 21좌표 배열
       timestamp: Date.now(),
       test_id: Math.random().toString(36).substr(2, 9),
     };
@@ -295,18 +295,23 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     try {
       const messageStr = JSON.stringify(message);
       aiWsRef.current.send(messageStr);
-      addDebugLog(`✅ 15프레임 시퀀스 전송 성공! [${message.test_id}]`);
-      addDebugLog(`📦 전송 크기: ${new Blob([messageStr]).size} bytes`);
-      addDebugLog(
-        `🎬 프레임 수: ${frameSequence.length}, 총 좌표: ${frameSequence.length * 21}`
-      );
+      addDebugLog(`10프레임 시퀀스 전송 성공! [${message.test_id}]`);
     } catch (error) {
-      addDebugLog(`❌ 시퀀스 전송 실패: ${error}`);
+      addDebugLog(`시퀀스 전송 실패: ${error}`);
     }
   };
 
   // 프레임 버퍼에 추가하는 함수
   const addToFrameBuffer = (handData: Array<{ x: number; y: number }>) => {
+    const now = Date.now();
+
+    // 프레임 전송 빈도 제어 (100ms 간격)
+    if (now - lastFrameTime < FRAME_SEND_INTERVAL) {
+      return; // 너무 빨리 오는 프레임은 무시
+    }
+
+    setLastFrameTime(now);
+
     // 21개 좌표가 없으면 0으로 패딩
     const paddedHandData = [];
     for (let i = 0; i < 21; i++) {
@@ -321,23 +326,19 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     const newBuffer = [...frameBufferRef.current, paddedHandData];
 
     if (newBuffer.length >= FRAME_BUFFER_SIZE) {
-      // 15프레임이 모이면 전송
-      const frameSequence = newBuffer.slice(-FRAME_BUFFER_SIZE); // 최근 15프레임만 사용
+      // 10프레임이 모이면 전송
+      const frameSequence = newBuffer.slice(-FRAME_BUFFER_SIZE); // 최근 10프레임만 사용
       sendFrameSequence(frameSequence);
 
-      // 버퍼 초기화 (슬라이딩 윈도우 방식으로 일부 유지)
-      frameBufferRef.current = newBuffer.slice(-5); // 마지막 5프레임 유지해서 연속성 확보
-      setFrameBuffer(frameBufferRef.current);
-      setBufferCount(frameBufferRef.current.length);
-
-      addDebugLog(`🎯 15프레임 전송 완료, 버퍼 리셋 (5프레임 유지)`);
+      // 버퍼 완전 초기화 (슬라이딩 윈도우 방식 제거)
+      frameBufferRef.current = [];
+      setFrameBuffer([]);
+      setBufferCount(0);
     } else {
       // 버퍼에 추가만
       frameBufferRef.current = newBuffer;
       setFrameBuffer(newBuffer);
       setBufferCount(newBuffer.length);
-
-      addDebugLog(`📥 프레임 버퍼링: ${newBuffer.length}/${FRAME_BUFFER_SIZE}`);
     }
   };
 
@@ -430,7 +431,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // 손 인식 결과 처리 - 15프레임 버퍼링
+  // 손 인식 결과 처리 - 10프레임 버퍼링
   const onHandsResults = (results: any) => {
     if (!results.multiHandLandmarks) {
       setHandLandmarks([]);
@@ -523,16 +524,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     if (!isClient) return;
 
     try {
-      addDebugLog("🔗 AI WebSocket 연결 시도 중...");
+      addDebugLog("AI WebSocket 연결 시도 중...");
       setAiStatus("connecting");
 
       const wsUrl = `${AI_WS_URL}?role=client&room=${roomId}`;
-      addDebugLog(`🌐 연결 URL: ${wsUrl}`);
+      addDebugLog(`연결 URL: ${wsUrl}`);
 
       const aiWs = new WebSocket(wsUrl);
 
       aiWs.onopen = () => {
-        addDebugLog("✅ AI WebSocket 연결 성공!");
+        addDebugLog("AI WebSocket 연결 성공!");
         setAiStatus("connected");
 
         // 연결 즉시 테스트 메시지 전송
@@ -545,14 +546,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
         try {
           aiWs.send(JSON.stringify(testMessage));
-          addDebugLog("📤 연결 테스트 메시지 전송 완료");
+          addDebugLog("연결 테스트 메시지 전송 완료");
         } catch (error) {
-          addDebugLog(`❌ 테스트 메시지 전송 실패: ${error}`);
+          addDebugLog(`테스트 메시지 전송 실패: ${error}`);
         }
       };
 
       aiWs.onmessage = (event) => {
-        addDebugLog(`📨 서버 응답 받음: ${event.data}`);
+        addDebugLog(`서버 응답 받음: ${event.data}`);
         try {
           const data = JSON.parse(event.data);
 
@@ -567,19 +568,19 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
       aiWs.onclose = (event) => {
         addDebugLog(
-          `❌ AI WebSocket 연결 종료: code=${event.code}, reason=${event.reason}`
+          `AI WebSocket 연결 종료: code=${event.code}, reason=${event.reason}`
         );
         setAiStatus("disconnected");
       };
 
       aiWs.onerror = (error) => {
-        addDebugLog(`❌ AI WebSocket 에러: ${error}`);
+        addDebugLog(`AI WebSocket 에러: ${error}`);
         setAiStatus("disconnected");
       };
 
       aiWsRef.current = aiWs;
     } catch (error) {
-      addDebugLog(`❌ WebSocket 생성 실패: ${error}`);
+      addDebugLog(`WebSocket 생성 실패: ${error}`);
       setAiStatus("disconnected");
     }
   };
