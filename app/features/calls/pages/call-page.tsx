@@ -220,10 +220,16 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   }) => {
     const now = Date.now();
 
-    // 마지막 업데이트로부터 최소 시간이 지났는지 확인
+    // 수어 동작 중 실시간 업데이트를 위해 최소 시간 제한 완화
     if (now - lastSubtitleUpdate < SUBTITLE_CONFIG.MIN_DISPLAY_TIME) {
-      addDebugLog(`자막 업데이트 너무 빨름, 지연됨`);
-      return;
+      // 신뢰도가 높거나 내용이 많이 다르면 바로 업데이트 허용
+      const currentConfidence = subtitle.confidence || 1.0;
+      if (currentConfidence < 0.8 && displayedSubtitle) {
+        addDebugLog(
+          `자막 업데이트 지연: 신뢰도 낮음 ${(currentConfidence * 100).toFixed(1)}%`
+        );
+        return;
+      }
     }
 
     setDisplayedSubtitle(subtitle.text);
@@ -247,7 +253,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       clearTimeout(subtitleTimeoutRef.current);
     }
 
-    // 자막 자동 제거 타이머
+    // 자막 자동 제거 타이머 (수어 동작 중에는 더 짧게)
     subtitleTimeoutRef.current = setTimeout(() => {
       setDisplayedSubtitle("");
       setCurrentSubtitle("");
