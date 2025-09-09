@@ -60,12 +60,23 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const [bufferCount, setBufferCount] = useState(0);
   const FRAME_BUFFER_SIZE = 10; // 10프레임 모아서 전송
 
-  // 자막 상태들
+  // 자막 상태들 (기존)
   const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
   const [subtitleHistory, setSubtitleHistory] = useState<
     Array<{ text: string; timestamp: number; score?: number }>
   >([]);
   const [showSubtitleHistory, setShowSubtitleHistory] = useState(false);
+
+  // 자막 안정화 관련 새로운 상태들
+  const [subtitleQueue, setSubtitleQueue] = useState<
+    Array<{
+      text: string;
+      timestamp: number;
+      confidence?: number;
+    }>
+  >([]);
+  const [displayedSubtitle, setDisplayedSubtitle] = useState<string>("");
+  const [lastSubtitleUpdate, setLastSubtitleUpdate] = useState<number>(0);
 
   // Refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -83,8 +94,21 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 자막 안정화 관련 refs
+  const subtitleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const subtitleStabilityRef = useRef<NodeJS.Timeout | null>(null);
+
   // 현재 AI 활성 상태를 ref로도 관리 (콜백에서 최신 상태 참조)
   const isAIEnabledRef = useRef(false);
+
+  // 자막 안정화 설정
+  const SUBTITLE_CONFIG = {
+    MIN_DISPLAY_TIME: 2000, // 최소 2초간 표시
+    STABILITY_DELAY: 500, // 0.5초 안정화 지연
+    MAX_DISPLAY_TIME: 5000, // 최대 5초간 표시
+    MIN_CONFIDENCE: 0.7, // 최소 신뢰도 (70%)
+    DUPLICATE_THRESHOLD: 0.8, // 중복 판정 임계값 (80% 유사)
+  };
 
   // 디버그 로그 함수
   const addDebugLog = (message: string) => {
@@ -97,6 +121,158 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
 
   // 클라이언트 사이드에서만 실행되는 함수들을 위한 헬퍼
   const isClient = typeof window !== "undefined";
+
+  // 문자열 유사도 계산 함수
+  const calculateSimilarity = (str1: string, str2: string): number => {
+    if (!str1 || !str2) return 0;
+
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+
+    if (longer.length === 0) return 1.0;
+
+    const distance = levenshteinDistance(longer, shorter);
+    return (longer.length - distance) / longer.length;
+  };
+
+  // 레벤슈타인 거리 계산
+  const levenshteinDistance = (str1: string, str2: string): number => {
+    const matrix = [];
+
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+
+    return matrix[str2.length][str1.length];
+  };
+
+  // 자막 필터링 및 안정화 함수
+  const processSubtitle = (newText: string, confidence: number = 1.0) => {
+    const now = Date.now();
+
+    // 신뢰도가 너무 낮으면 무시
+    if (confidence < SUBTITLE_CONFIG.MIN_CONFIDENCE) {
+      addDebugLog(`❌ 자막 신뢰도 낮음: ${(confidence * 100).toFixed(1)}%`);
+      return;
+    }
+
+    // 현재 표시된 자막과 유사도 확인
+    if (displayedSubtitle) {
+      const similarity = calculateSimilarity(
+        displayedSubtitle.toLowerCase(),
+        newText.toLowerCase()
+      );
+      if (similarity > SUBTITLE_CONFIG.DUPLICATE_THRESHOLD) {
+        addDebugLog(
+          `⚪ 유사한 자막 무시: ${(similarity * 100).toFixed(1)}% 유사`
+        );
+        return;
+      }
+    }
+
+    // 자막 큐에 추가
+    const newSubtitle = {
+      text: newText,
+      timestamp: now,
+      confidence: confidence,
+    };
+
+    setSubtitleQueue((prev) => [...prev.slice(-4), newSubtitle]); // 최대 5개 유지
+
+    // 기존 안정화 타이머 클리어
+    if (subtitleStabilityRef.current) {
+      clearTimeout(subtitleStabilityRef.current);
+    }
+
+    // 안정화 지연 후 자막 업데이트
+    subtitleStabilityRef.current = setTimeout(() => {
+      updateDisplayedSubtitle(newSubtitle);
+    }, SUBTITLE_CONFIG.STABILITY_DELAY);
+
+    addDebugLog(
+      `📝 자막 큐 추가: "${newText}" (신뢰도: ${(confidence * 100).toFixed(1)}%)`
+    );
+  };
+
+  // 표시할 자막 업데이트
+  const updateDisplayedSubtitle = (subtitle: {
+    text: string;
+    timestamp: number;
+    confidence?: number;
+  }) => {
+    const now = Date.now();
+
+    // 마지막 업데이트로부터 최소 시간이 지났는지 확인
+    if (now - lastSubtitleUpdate < SUBTITLE_CONFIG.MIN_DISPLAY_TIME) {
+      addDebugLog(`⏰ 자막 업데이트 너무 빨름, 지연됨`);
+      return;
+    }
+
+    setDisplayedSubtitle(subtitle.text);
+    setCurrentSubtitle(subtitle.text);
+    setLastSubtitleUpdate(now);
+
+    // 자막 히스토리에 추가
+    setSubtitleHistory((prev) => [
+      ...prev,
+      {
+        text: subtitle.text,
+        timestamp: subtitle.timestamp,
+        score: subtitle.confidence,
+      },
+    ]);
+
+    addDebugLog(`✅ 자막 표시: "${subtitle.text}"`);
+
+    // 기존 타이머 클리어
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+    }
+
+    // 자막 자동 제거 타이머
+    subtitleTimeoutRef.current = setTimeout(() => {
+      setDisplayedSubtitle("");
+      setCurrentSubtitle("");
+      addDebugLog(`🗑️ 자막 자동 제거`);
+    }, SUBTITLE_CONFIG.MAX_DISPLAY_TIME);
+  };
+
+  // 수동 자막 제거 함수
+  const clearCurrentSubtitle = () => {
+    setDisplayedSubtitle("");
+    setCurrentSubtitle("");
+    setLastSubtitleUpdate(0);
+
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
+
+    if (subtitleStabilityRef.current) {
+      clearTimeout(subtitleStabilityRef.current);
+      subtitleStabilityRef.current = null;
+    }
+
+    addDebugLog(`🧹 자막 수동 제거`);
+  };
 
   // 15프레임 시퀀스 전송 함수
   const sendFrameSequence = (frameSequence: any[][]) => {
@@ -381,18 +557,8 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           const data = JSON.parse(event.data);
 
           if (data.type === "caption") {
-            setCurrentSubtitle(data.text);
-            setSubtitleHistory((prev) => [
-              ...prev,
-              {
-                text: data.text,
-                timestamp: Date.now(),
-                score: data.confidence,
-              },
-            ]);
-
-            // 3초 후 자막 제거
-            setTimeout(() => setCurrentSubtitle(""), 3000);
+            // 새로운 자막 처리 함수 사용
+            processSubtitle(data.text, data.confidence || 1.0);
           }
         } catch (error) {
           addDebugLog(`메시지 파싱 오류: ${error}`);
@@ -853,6 +1019,17 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
       aiWsRef.current.close();
     }
 
+    // 자막 관련 타이머 클리어 추가
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
+
+    if (subtitleStabilityRef.current) {
+      clearTimeout(subtitleStabilityRef.current);
+      subtitleStabilityRef.current = null;
+    }
+
     // AI 상태 초기화
     setIsAIEnabled(false);
     isAIEnabledRef.current = false;
@@ -862,6 +1039,12 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
     frameBufferRef.current = [];
     setFrameBuffer([]);
     setBufferCount(0);
+
+    // 자막 상태 초기화
+    setSubtitleQueue([]);
+    setDisplayedSubtitle("");
+    setCurrentSubtitle("");
+    setLastSubtitleUpdate(0);
   };
 
   // 시간 포맷팅 (기존 코드)
@@ -993,6 +1176,14 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           {isMediaPipeInitializing ? "YES" : "NO"} | WS={aiStatus} | Buffer=
           {bufferCount}/{FRAME_BUFFER_SIZE}
         </div>
+        {/* 자막 상태 표시 추가 */}
+        <div className="text-purple-300 mt-1">
+          📝 Subtitle: Queue={subtitleQueue.length} | Current="
+          {displayedSubtitle || "none"}" | Last=
+          {lastSubtitleUpdate
+            ? new Date(lastSubtitleUpdate).toLocaleTimeString()
+            : "never"}
+        </div>
       </div>
 
       {/* 비디오 영역 */}
@@ -1030,22 +1221,43 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
           />
         )}
 
-        {/* 현재 자막 표시 */}
-        {currentSubtitle && (
+        {/* 현재 자막 표시 - displayedSubtitle 사용 */}
+        {displayedSubtitle && (
           <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-80 text-white px-4 py-2 rounded-lg text-center max-w-md">
-            <div className="text-lg font-bold">{currentSubtitle}</div>
+            <div className="text-lg font-bold">{displayedSubtitle}</div>
           </div>
         )}
 
-        {/* 자막 히스토리 버튼 */}
-        {subtitleHistory.length > 0 && (
-          <button
-            onClick={() => setShowSubtitleHistory(!showSubtitleHistory)}
-            className="absolute bottom-2 left-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-          >
-            자막 기록 ({subtitleHistory.length})
-          </button>
-        )}
+        {/* 자막 제어 버튼들 */}
+        <div className="absolute bottom-2 left-2 flex gap-2">
+          {/* 자막 히스토리 버튼 */}
+          {subtitleHistory.length > 0 && (
+            <button
+              onClick={() => setShowSubtitleHistory(!showSubtitleHistory)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+            >
+              자막 기록 ({subtitleHistory.length})
+            </button>
+          )}
+
+          {/* 현재 자막 제거 버튼 */}
+          {displayedSubtitle && (
+            <button
+              onClick={clearCurrentSubtitle}
+              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+              title="현재 자막 제거"
+            >
+              자막 제거
+            </button>
+          )}
+
+          {/* 자막 큐 상태 표시 */}
+          {subtitleQueue.length > 0 && (
+            <div className="bg-yellow-600 text-white px-2 py-1 rounded text-xs">
+              큐: {subtitleQueue.length}
+            </div>
+          )}
+        </div>
 
         {/* 자막 히스토리 패널 */}
         {showSubtitleHistory && (
