@@ -380,7 +380,7 @@ export default function CallPage({ loaderData }: Route.ComponentProps) {
         try {
           const data = JSON.parse(event.data);
 
-          if (data.type === "subtitle") {
+          if (data.type === "caption") {
             setCurrentSubtitle(data.text);
             setSubtitleHistory((prev) => [
               ...prev,
